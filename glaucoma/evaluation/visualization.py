@@ -20,8 +20,18 @@ class VisualizationManager:
         self.viz_dir = self.output_dir / "visualizations"
         self.viz_dir.mkdir(exist_ok=True, parents=True)
         
-        # Set default matplotlib style
-        plt.style.use('seaborn')
+        # Set default matplotlib style with fallback options
+        try:
+            # Try different seaborn style variants
+            for style_name in ['seaborn-v0_8', 'seaborn-v0_8-darkgrid', 'seaborn', 'ggplot']:
+                try:
+                    plt.style.use(style_name)
+                    break
+                except:
+                    continue
+        except:
+            # Final fallback to default style
+            print("Warning: Could not set custom matplotlib style, using default")
     
     def plot_training_history(self, history_file: Union[str, Path]) -> Optional[Path]:
         """Plot training metrics history from CSV logs.
@@ -157,26 +167,55 @@ class VisualizationManager:
         
         return output_path
     
-    def plot_confusion_matrix(self, cm, class_names=['Background', 'Glaucoma'], 
-                            output_name: str = 'confusion_matrix.png') -> Path:
+    def plot_confusion_matrix(
+        self, 
+        cm: np.ndarray, 
+        class_names: List[str] = ['Background', 'Glaucoma'], 
+        output_filename: str = 'confusion_matrix.png',
+        normalize: bool = False
+    ) -> Path:
         """Plot confusion matrix.
         
         Args:
             cm: Confusion matrix array [[tn, fp], [fn, tp]]
             class_names: Names of classes
-            output_name: Name of output file
+            output_filename: Name of output file
+            normalize: Whether to normalize the confusion matrix
             
         Returns:
-            Path to saved image
+            Path to saved visualization
         """
+        # Convert cm to integer to resolve formatting issue
+        cm_int = np.round(cm).astype(int)
+        
+        # Normalize if requested
+        if normalize and cm_int.sum() > 0:
+            cm_norm = cm_int.astype('float') / cm_int.sum(axis=1)[:, np.newaxis]
+            cm_display = cm_norm
+            fmt = '.2f'
+        else:
+            cm_display = cm_int
+            fmt = 'd'
+        
         plt.figure(figsize=(8, 6))
-        sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', xticklabels=class_names, yticklabels=class_names)
-        plt.xlabel('Predicted')
-        plt.ylabel('True')
-        plt.title('Confusion Matrix')
+        
+        # Create heatmap
+        sns.heatmap(
+            cm_display, 
+            annot=True, 
+            fmt=fmt, 
+            cmap='Blues', 
+            xticklabels=class_names, 
+            yticklabels=class_names,
+            cbar=True
+        )
+        
+        plt.xlabel('Predicted', fontsize=12)
+        plt.ylabel('True', fontsize=12)
+        plt.title('Confusion Matrix', fontsize=14)
         
         # Save figure
-        output_path = self.viz_dir / output_name
+        output_path = self.viz_dir / output_filename
         plt.tight_layout()
         plt.savefig(output_path, dpi=200, bbox_inches='tight')
         plt.close()

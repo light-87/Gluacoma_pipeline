@@ -366,15 +366,7 @@ def create_dataloaders(
     Create DataLoaders for training, validation, and testing.
     
     Args:
-        df: DataFrame with image data and 'split' column
-        transform_train: Transformations for training data
-        transform_val: Transformations for validation/test data
-        batch_size: Batch size
-        num_workers: Number of worker processes
-        target_size: Image target size (width, height)
-        cache_size: Cache size for each dataset
-        prefetch_size: Number of images to prefetch
-        mode: 'segmentation' or 'classification'
+        # [existing docstring parameters]
         
     Returns:
         Dictionary with 'train', 'val', and 'test' DataLoaders
@@ -433,7 +425,10 @@ def create_dataloaders(
         prefetch_size=prefetch_size if len(test_df) > 0 else 0,
         mode=mode
     )
-    
+    if prefetch_size > 0 or cache_size > 0:
+        logger.warning("Using dataset with thread-based features (prefetching/caching). "
+                        "Setting num_workers to 0 to avoid pickle errors.")
+        num_workers = 0
     # Create dataloaders
     dataloaders = {
         'train': DataLoader(
