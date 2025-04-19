@@ -16,7 +16,7 @@ import datetime
 import json
 from typing import List, Dict, Any, Optional, Union
 
-from glaucoma.config import parse_args_and_create_config, Config
+from glaucoma.config import Config, get_argument_parser, parse_args_and_create_config
 from glaucoma.data.loader import DatasetLoader, save_dataset
 from glaucoma.data.dataset import create_dataloaders
 from glaucoma.data.augmentation import get_augmentations
@@ -29,7 +29,9 @@ from glaucoma.utils.wandb_logger import WandBLogger
 def main():
     """Main entry point for the pipeline."""
     # Parse arguments and create configuration
-    config = parse_args_and_create_config()
+    parser = get_argument_parser()
+    args = parser.parse_args()
+    config = parse_args_and_create_config(args)
     
     # Create run ID based on timestamp
     run_id = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
@@ -89,12 +91,13 @@ def main():
         
         # Save consolidated dataset
         dataset_path = output_dir / "dataset.csv"
+        config.data.dataset_file = str(dataset_path)
         save_dataset(
             df,
             dataset_path,
             create_splits=True,
-            train_ratio=config.data.train_ratio,
-            val_ratio=config.data.val_ratio,
+            train_ratio=config.data.train_ratio if hasattr(config.data, 'train_ratio') else 0.7,
+            val_ratio=config.data.val_ratio if hasattr(config.data, 'val_ratio') else 0.15,
             random_state=config.data.random_state
         )
         
@@ -439,7 +442,7 @@ def main():
     logger.log_run_summary(str(summary_path))
     
     # Update run notebook
-    notebook_path = Path(config.pipeline.output_dir) / "notebook.md"
+    notebook_path = Path(config.output_dir) / "notebook.md"
     logger.update_notebook(str(notebook_path))
     
     logger.info("Pipeline completed successfully")

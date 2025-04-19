@@ -1,1 +1,10 @@
 ﻿data
+glaucoma/__pycache__
+output
+wandb
+glaucoma_detection.egg-info
+glaucoma/utils/__pycache__
+glaucoma/training/__pycache__
+glaucoma/models/__pycache__
+glaucoma/evaluation/__pycache__
+glaucoma/data/__pycache__

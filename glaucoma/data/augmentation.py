@@ -137,20 +137,20 @@ def get_augmentations(
     Returns:
         Albumentations Compose object with augmentations
     """
-    if is_train and config.augmentation.enabled:
+    if is_train and config.augmentation_enabled:
         return get_training_augmentations(
-            image_size=tuple(config.data.image_size),
-            rotation_range=config.augmentation.rotation_range,
-            shift_range=config.augmentation.width_shift_range,
-            scale_range=config.augmentation.zoom_range,
+            image_size=(config.image_size, config.image_size),
+            rotation_range=getattr(config, 'rotation_range', 15.0),
+            shift_range=getattr(config, 'shift_range', 0.1),
+            scale_range=getattr(config, 'scale_range', 0.1),
             brightness_contrast_range=0.2,  # Fixed value
-            horizontal_flip=config.augmentation.horizontal_flip,
-            vertical_flip=config.augmentation.vertical_flip,
+            horizontal_flip=getattr(config, 'horizontal_flip', True),
+            vertical_flip=getattr(config, 'vertical_flip', False),
             normalization='imagenet'  # Fixed value
         )
     else:
         return get_validation_augmentations(
-            image_size=tuple(config.data.image_size),
+            image_size=(config.image_size, config.image_size),
             normalization='imagenet'  # Fixed value
         )
 

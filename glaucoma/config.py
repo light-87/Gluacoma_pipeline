@@ -8,7 +8,20 @@ from typing import Dict, List, Optional, Any, Union
 @dataclass
 class DataConfig:
     """Data configuration."""
-    data_dirs: Dict[str, Dict[str, str]] = field(default_factory=dict)
+    data_dirs: Dict[str, Dict[str, str]] = field(default_factory=lambda: {
+        'REFUGE': {
+            'images': 'data/REFUGE/Images_Square',
+            'masks': 'data/REFUGE/Masks_Square'
+        },
+        'ORIGA': {
+            'images': 'data/ORIGA/Images_Square',
+            'masks': 'data/ORIGA/Masks_Square'
+        },
+        'G1020': {
+            'images': 'data/G1020/Images_Square',
+            'masks': 'data/G1020/Masks_Square'
+        }
+    })
     dataset_file: Optional[str] = None
     output_dataset_file: Optional[str] = None
     save_dataset: bool = True
@@ -184,15 +197,21 @@ def get_argument_parser() -> argparse.ArgumentParser:
     
     return parser
 
-def parse_args_and_create_config(args: argparse.Namespace) -> Config:
+def parse_args_and_create_config(args=None):
     """Create configuration from command-line arguments.
     
     Args:
-        args: Parsed command-line arguments
+        args: Parsed command-line arguments. If None, arguments will be parsed
+             from command line.
         
     Returns:
         Configuration object
     """
+    # If args is None, parse arguments
+    if args is None:
+        parser = get_argument_parser()
+        args = parser.parse_args()
+    
     # If config file is provided, load it
     if args.config_file:
         config = Config.from_json(args.config_file)
