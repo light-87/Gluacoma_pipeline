@@ -2,7 +2,7 @@
 Main Entry Point for Glaucoma Detection Pipeline
 
 This script serves as the entry point for the glaucoma detection pipeline,
-handling command-line arguments and coordinating the execution of pipeline steps.
+with enhanced Weights & Biases integration for better visualization.
 """
 
 import os
@@ -26,10 +26,17 @@ from glaucoma.evaluation.evaluator import Evaluator
 from glaucoma.utils.logging import get_logger
 from glaucoma.utils.wandb_logger import WandBLogger
 
+
 def main():
     """Main entry point for the pipeline."""
     # Parse arguments and create configuration
     parser = get_argument_parser()
+    
+    # Add specific wandb options
+    parser.add_argument('--wandb-detailed-viz', action='store_true', help='Enable detailed W&B visualizations')
+    parser.add_argument('--wandb-log-code', action='store_true', help='Log code to W&B')
+    parser.add_argument('--wandb-notes', type=str, help='Notes for W&B run')
+    
     args = parser.parse_args()
     config = parse_args_and_create_config(args)
     
@@ -62,12 +69,28 @@ def main():
     # Initialize W&B if enabled
     wandb_logger = None
     if hasattr(config, 'logging') and getattr(config.logging, 'use_wandb', False):
+        # Get run name (use args or create one)
+        run_name = args.run_name if hasattr(args, 'run_name') and args.run_name else f"glaucoma_{run_id}"
+        
+        # Get tags (automatic step tags + custom tags)
+        tags = [f"step_{step}" for step in steps]
+        if hasattr(config.logging, 'tags') and config.logging.tags:
+            tags.extend(config.logging.tags)
+        
+        # Initialize W&B logger with possible notes
         wandb_logger = WandBLogger(
             config=config,
-            run_name=f"glaucoma_{run_id}",
-            tags=[f"step_{step}" for step in steps]
+            project_name=getattr(config.logging, 'wandb_project', 'glaucoma-detection'),
+            run_name=run_name,
+            tags=tags,
+            notes=args.wandb_notes if hasattr(args, 'wandb_notes') else None
         )
         logger.info("Initialized Weights & Biases logging")
+        
+        # Log code if requested
+        if hasattr(args, 'wandb_log_code') and args.wandb_log_code:
+            wandb_logger.log_code()
+            logger.info("Logged code to Weights & Biases")
     
     # Create checkpoint directory
     checkpoint_dir = output_dir / "checkpoints"
@@ -96,8 +119,8 @@ def main():
             df,
             dataset_path,
             create_splits=True,
-            train_ratio=config.data.train_ratio if hasattr(config.data, 'train_ratio') else 0.7,
-            val_ratio=config.data.val_ratio if hasattr(config.data, 'val_ratio') else 0.15,
+            train_ratio=0.7,  # Default if not specified
+            val_ratio=getattr(config.data, 'validation_split', 0.15),
             random_state=config.data.random_state
         )
         
@@ -108,6 +131,22 @@ def main():
         # Log to W&B
         if wandb_logger:
             wandb_logger.log({"dataset_size": len(df), **stats})
+            
+            # Log dataset distribution as a table
+            if 'dataset' in df.columns:
+                dataset_counts = df['dataset'].value_counts().reset_index()
+                dataset_counts.columns = ['Dataset', 'Count']
+                dataset_counts['Percentage'] = 100 * dataset_counts['Count'] / len(df)
+                
+                dataset_table = []
+                for _, row in dataset_counts.iterrows():
+                    dataset_table.append([row['Dataset'], int(row['Count']), float(row['Percentage'])])
+                
+                wandb_logger.log_table(
+                    dataset_table,
+                    table_name="dataset_distribution",
+                    columns=["Dataset", "Count", "Percentage"]
+                )
         
         logger.log_step_end("load")
     
@@ -141,8 +180,8 @@ def main():
             batch_size=config.training.batch_size,
             num_workers=config.training.num_workers,
             target_size=(config.preprocessing.image_size, config.preprocessing.image_size),
-            cache_size=config.data.cache_size if hasattr(config.data, 'cache_size') else 100,
-            prefetch_size=config.data.prefetch_size if hasattr(config.data, 'prefetch_size') else 0,
+            cache_size=getattr(config.data, 'cache_size', 100) if hasattr(config.data, 'cache_size') else 100,
+            prefetch_size=getattr(config.data, 'prefetch_size', 0) if hasattr(config.data, 'prefetch_size') else 0,
             mode='segmentation'
         )
         
@@ -168,6 +207,53 @@ def main():
         # Log to W&B
         if wandb_logger:
             wandb_logger.log(preprocess_info)
+            
+            # Log data split distribution
+            if 'split' in df.columns:
+                split_counts = df['split'].value_counts().reset_index()
+                split_counts.columns = ['Split', 'Count']
+                split_counts['Percentage'] = 100 * split_counts['Count'] / len(df)
+                
+                split_table = []
+                for _, row in split_counts.iterrows():
+                    split_table.append([row['Split'], int(row['Count']), float(row['Percentage'])])
+                
+                wandb_logger.log_table(
+                    split_table,
+                    table_name="data_split_distribution",
+                    columns=["Split", "Count", "Percentage"]
+                )
+            
+            # Try to log sample augmentations if available
+            try:
+                # Get a few training samples
+                train_iter = iter(dataloaders['train'])
+                train_images, train_masks = next(train_iter)
+                
+                # Convert a few samples to numpy for visualization
+                num_samples = min(5, len(train_images))
+                sample_images = []
+                sample_titles = []
+                
+                for i in range(num_samples):
+                    # Get original image
+                    img = train_images[i].numpy().transpose(1, 2, 0)
+                    
+                    # Denormalize if needed
+                    if img.max() <= 1.0:
+                        img = (img * 255).astype(np.uint8)
+                    
+                    sample_images.append(img)
+                    sample_titles.append(f"Sample {i+1}")
+                
+                # Log sample grid
+                wandb_logger.log_image_grid(
+                    sample_images,
+                    sample_titles,
+                    "training_samples"
+                )
+            except Exception as e:
+                logger.warning(f"Could not log sample images: {e}")
         
         logger.log_step_end("preprocess")
     
@@ -188,9 +274,6 @@ def main():
         # Log model to W&B
         if wandb_logger:
             wandb_logger.log_model(model)
-            # Log code to W&B if enabled
-            if hasattr(config.logging, 'log_code') and config.logging.log_code:
-                wandb_logger.log_code()
         
         # Make sure dataloaders are created
         if 'preprocess' not in steps:
@@ -220,19 +303,20 @@ def main():
                 batch_size=config.training.batch_size,
                 num_workers=config.training.num_workers,
                 target_size=(config.preprocessing.image_size, config.preprocessing.image_size),
-                cache_size=config.data.cache_size if hasattr(config.data, 'cache_size') else 100,
-                prefetch_size=config.data.prefetch_size if hasattr(config.data, 'prefetch_size') else 0,
+                cache_size=getattr(config.data, 'cache_size', 100) if hasattr(config.data, 'cache_size') else 100,
+                prefetch_size=getattr(config.data, 'prefetch_size', 0) if hasattr(config.data, 'prefetch_size') else 0,
                 mode='segmentation'
             )
         
-        # Create trainer
+        # Create trainer (with wandb_logger)
         trainer = Trainer(
             model=model,
             train_loader=dataloaders['train'],
             val_loader=dataloaders['val'],
             config=config.training,
             logger=logger,
-            checkpoint_dir=str(checkpoint_dir)
+            checkpoint_dir=str(checkpoint_dir),
+            wandb_logger=wandb_logger  # Pass wandb_logger to trainer
         )
         
         # Train model
@@ -245,18 +329,25 @@ def main():
         final_model_path = checkpoint_dir / "final_model.pt"
         torch.save({
             'model_state_dict': model.state_dict(),
-            'config': vars(config) if hasattr(config, '__dict__') else config
+            'config': vars(config) if hasattr(config, '__dict__') else config,
+            'results': train_results
         }, final_model_path)
         logger.info(f"Saved final model to {final_model_path}")
         
         # Log to W&B
         if wandb_logger:
-            wandb_logger.log(train_results)
+            wandb_logger.log({k: v for k, v in train_results.items() 
+                             if isinstance(v, (int, float)) and not isinstance(v, bool)})
             wandb_logger.save_model(
                 model, 
                 name="final_model",
-                metadata={'epochs': config.training.epochs, **train_results}
+                metadata={'epochs': config.training.epochs, **{k: v for k, v in train_results.items() 
+                                                              if isinstance(v, (int, float)) and not isinstance(v, bool)}}
             )
+            
+            # Log training metrics over time if available
+            if 'metrics_history' in train_results:
+                wandb_logger.log_metrics_over_time(train_results['metrics_history'])
         
         logger.log_step_end("train")
     
@@ -315,19 +406,19 @@ def main():
                 batch_size=config.evaluation.batch_size,
                 num_workers=config.training.num_workers,
                 target_size=(config.preprocessing.image_size, config.preprocessing.image_size),
-                cache_size=config.data.cache_size if hasattr(config.data, 'cache_size') else 100,
-                prefetch_size=config.data.prefetch_size if hasattr(config.data, 'prefetch_size') else 0,
+                cache_size=getattr(config.data, 'cache_size', 100) if hasattr(config.data, 'cache_size') else 100,
+                prefetch_size=getattr(config.data, 'prefetch_size', 0) if hasattr(config.data, 'prefetch_size') else 0,
                 mode='segmentation'
             )
         
-        # Create evaluator
+        # Create evaluator with wandb_logger
         evaluator = Evaluator(
             model=model,
             dataloader=dataloaders['test'],
             config=config.evaluation,
             logger=logger,
             output_dir=str(output_dir),
-            wandb_logger=wandb_logger
+            wandb_logger=wandb_logger  # Pass wandb_logger to evaluator
         )
         
         # Evaluate model
@@ -339,13 +430,11 @@ def main():
         # Save evaluation results
         eval_path = output_dir / "evaluation_results.json"
         with open(eval_path, 'w') as f:
-            json.dump(eval_results, f, indent=4, default=str)
+            json.dump({k: v for k, v in eval_results.items() 
+                      if not isinstance(v, dict) or k in ['confusion_matrix']}, 
+                     f, indent=4, default=str)
         
-        # Log to W&B
-        if wandb_logger:
-            wandb_logger.log(
-                {k: v for k, v in eval_results.items() if isinstance(v, (int, float)) and not isinstance(v, bool)}
-            )
+        # Note: WandB logging is now handled inside the Evaluator class
         
         logger.log_step_end("evaluate")
     
@@ -398,19 +487,22 @@ def main():
                 batch_size=config.evaluation.batch_size,
                 num_workers=config.training.num_workers,
                 target_size=(config.preprocessing.image_size, config.preprocessing.image_size),
-                cache_size=config.data.cache_size if hasattr(config.data, 'cache_size') else 100,
-                prefetch_size=config.data.prefetch_size if hasattr(config.data, 'prefetch_size') else 0,
+                cache_size=getattr(config.data, 'cache_size', 100) if hasattr(config.data, 'cache_size') else 100,
+                prefetch_size=getattr(config.data, 'prefetch_size', 0) if hasattr(config.data, 'prefetch_size') else 0,
                 mode='segmentation'
             )
         
-        # Create evaluator
+        # Create evaluator with wandb_logger
+        ensemble_output_dir = output_dir / "ensemble"
+        ensemble_output_dir.mkdir(exist_ok=True)
+        
         evaluator = Evaluator(
             model=None,  # No single model for ensemble evaluation
             dataloader=dataloaders['test'],
             config=config.evaluation,
             logger=logger,
-            output_dir=str(output_dir / "ensemble"),
-            wandb_logger=wandb_logger
+            output_dir=str(ensemble_output_dir),
+            wandb_logger=wandb_logger  # Pass wandb_logger to evaluator
         )
         
         # Evaluate ensemble
@@ -420,16 +512,13 @@ def main():
         logger.info(f"Ensemble evaluation results: {ensemble_results}")
         
         # Save evaluation results
-        ensemble_path = output_dir / "ensemble_results.json"
+        ensemble_path = ensemble_output_dir / "ensemble_results.json"
         with open(ensemble_path, 'w') as f:
-            json.dump(ensemble_results, f, indent=4, default=str)
+            json.dump({k: v for k, v in ensemble_results.items() 
+                      if not isinstance(v, dict) or k in ['confusion_matrix', 'ensemble_comparison']}, 
+                     f, indent=4, default=str)
         
-        # Log to W&B
-        if wandb_logger:
-            wandb_logger.log(
-                {f"ensemble_{k}": v for k, v in ensemble_results.items() 
-                 if isinstance(v, (int, float)) and not isinstance(v, bool)}
-            )
+        # Note: WandB logging is now handled inside the Evaluator class
         
         logger.log_step_end("ensemble")
     

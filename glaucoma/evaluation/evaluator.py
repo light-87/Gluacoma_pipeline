@@ -1,476 +1,619 @@
 """
-Evaluation Module
+Evaluator Module
 
-Implements comprehensive evaluation of glaucoma detection models.
+Implements comprehensive evaluation for glaucoma detection models.
 """
 
-import os
 import torch
 import numpy as np
-from tqdm import tqdm
+import matplotlib.pyplot as plt
 from pathlib import Path
-import pandas as pd
-from typing import Dict, List, Optional, Union, Any, Tuple
+import os
+from tqdm import tqdm
+from typing import Dict, Any, List, Optional, Union, Tuple
+import json
+import torch.nn.functional as F
 
 from glaucoma.evaluation.metrics import (
-    calculate_dice_coefficient,
-    calculate_iou,
-    calculate_metrics,
-    calculate_cdr
+    calculate_metrics, calculate_roc_curve, calculate_pr_curve, 
+    calculate_confusion_matrix_elements
 )
 from glaucoma.evaluation.visualization import VisualizationManager
-from glaucoma.utils.logging import PipelineLogger
-
 
 class Evaluator:
-    """Class for evaluating model performance."""
+    """Evaluator class for model evaluation."""
     
     def __init__(
         self, 
-        model: torch.nn.Module,
-        dataloader: torch.utils.data.DataLoader,
-        config: Any,
-        logger: PipelineLogger,
-        output_dir: Optional[str] = None,
+        model: Optional[torch.nn.Module], 
+        dataloader: torch.utils.data.DataLoader, 
+        config: Any, 
+        logger: Any, 
+        output_dir: str,
         wandb_logger: Optional[Any] = None
     ):
         """Initialize evaluator.
         
         Args:
             model: Model to evaluate
-            dataloader: Test/validation dataloader
+            dataloader: Test dataloader
             config: Evaluation configuration
             logger: Logger for tracking progress
             output_dir: Directory to save evaluation results
-            wandb_logger: Optional WandB logger
+            wandb_logger: Optional Weights & Biases logger
         """
         self.model = model
         self.dataloader = dataloader
         self.config = config
         self.logger = logger
-        self.output_dir = Path(output_dir) if output_dir else Path(config.output_dir if hasattr(config, 'output_dir') else "output")
-        self.results_dir = self.output_dir / "evaluation_results"
-        self.results_dir.mkdir(parents=True, exist_ok=True)
+        self.output_dir = Path(output_dir)
         self.wandb_logger = wandb_logger
+        
+        # Create output directory if it doesn't exist
+        self.output_dir.mkdir(exist_ok=True, parents=True)
         
         # Set device
         self.device = torch.device('cuda' if torch.cuda.is_available() and getattr(config, 'use_gpu', True) else 'cpu')
+        if self.model is not None:
+            self.model = self.model.to(self.device)
         
-        # Set threshold
+        # Initialize visualization manager
+        self.visualization_manager = VisualizationManager(str(self.output_dir))
+        
+        # Set threshold for binary segmentation
         self.threshold = getattr(config, 'threshold', 0.5)
         
-        # Create visualization manager
-        self.viz_manager = VisualizationManager(str(self.results_dir))
+        # Test-time augmentation settings
+        self.use_tta = getattr(config, 'use_tta', False)
+        self.tta_scales = getattr(config, 'tta_scales', [0.75, 1.0, 1.25])
+        self.tta_flips = getattr(config, 'tta_flips', True)
+        self.tta_rotations = getattr(config, 'tta_rotations', [0, 90, 180, 270])
         
-        # Move model to device
-        self.model = self.model.to(self.device)
+        if self.use_tta:
+            self.logger.info(f"Using test-time augmentation with scales={self.tta_scales}, "
+                          f"flips={self.tta_flips}, rotations={self.tta_rotations}")
     
+    def _apply_tta(self, image: torch.Tensor) -> Tuple[List[torch.Tensor], List[Tuple]]:
+        """Apply test-time augmentations to an image.
+        
+        Args:
+            image: Input image tensor of shape (B, C, H, W)
+            
+        Returns:
+            Tuple of (augmented_images, transforms_info)
+            - augmented_images: List of augmented image tensors
+            - transforms_info: List of tuples (scale, flip, rotation) for each augmentation
+        """
+        B, C, H, W = image.shape
+        augmented_images = []
+        transforms_info = []
+        
+        # Loop through scales, flips, and rotations
+        for scale in self.tta_scales:
+            # Scale the image
+            if scale != 1.0:
+                # Calculate new dimensions
+                new_h, new_w = int(H * scale), int(W * scale)
+                # Scale the image
+                scaled_img = F.interpolate(image, size=(new_h, new_w), mode='bilinear', align_corners=False)
+                # Pad or crop to original size
+                if scale > 1.0:  # Crop
+                    diff_h, diff_w = new_h - H, new_w - W
+                    start_h, start_w = diff_h // 2, diff_w // 2
+                    scaled_img = scaled_img[:, :, start_h:start_h+H, start_w:start_w+W]
+                else:  # Pad
+                    diff_h, diff_w = H - new_h, W - new_w
+                    pad_h1, pad_w1 = diff_h // 2, diff_w // 2
+                    pad_h2, pad_w2 = diff_h - pad_h1, diff_w - pad_w1
+                    scaled_img = F.pad(scaled_img, (pad_w1, pad_w2, pad_h1, pad_h2), mode='reflect')
+            else:
+                scaled_img = image
+            
+            # Apply flips
+            if self.tta_flips:
+                # Original (no flip)
+                augmented_images.append(scaled_img)
+                transforms_info.append((scale, False, 0))
+                
+                # Horizontal flip
+                flipped_img = torch.flip(scaled_img, dims=[-1])
+                augmented_images.append(flipped_img)
+                transforms_info.append((scale, True, 0))
+            else:
+                # Only use original (no flip)
+                augmented_images.append(scaled_img)
+                transforms_info.append((scale, False, 0))
+            
+            # Apply rotations
+            if self.tta_rotations and len(self.tta_rotations) > 1:
+                for angle in self.tta_rotations[1:]:  # Skip 0 rotation as it's already included
+                    # Rotate image
+                    k = angle // 90  # Number of 90-degree rotations
+                    rotated_img = torch.rot90(scaled_img, k=k, dims=[-2, -1])
+                    augmented_images.append(rotated_img)
+                    transforms_info.append((scale, False, angle))
+                    
+                    # Rotate and flip
+                    if self.tta_flips:
+                        rotated_flipped_img = torch.flip(rotated_img, dims=[-1])
+                        augmented_images.append(rotated_flipped_img)
+                        transforms_info.append((scale, True, angle))
+        
+        return augmented_images, transforms_info
+    
+    def _reverse_augmentation(self, pred: torch.Tensor, transform_info: Tuple) -> torch.Tensor:
+        """Reverse the augmentation to get the prediction in original space.
+        
+        Args:
+            pred: Prediction tensor
+            transform_info: Tuple of (scale, flip, rotation)
+            
+        Returns:
+            Reversed prediction tensor
+        """
+        scale, flipped, angle = transform_info
+        
+        # Un-rotate
+        if angle != 0:
+            k = 4 - (angle // 90) % 4  # Inverse rotation (360 - angle) in terms of 90-degree units
+            pred = torch.rot90(pred, k=k, dims=[-2, -1])
+        
+        # Un-flip
+        if flipped:
+            pred = torch.flip(pred, dims=[-1])
+        
+        # Un-scale
+        if scale != 1.0:
+            _, _, H, W = pred.shape
+            orig_h, orig_w = int(H / scale), int(W / scale)
+            
+            if scale > 1.0:  # Was cropped, now pad
+                diff_h, diff_w = int(H * scale) - H, int(W * scale) - W
+                pad_h1, pad_w1 = diff_h // 2, diff_w // 2
+                pad_h2, pad_w2 = diff_h - pad_h1, diff_w - pad_w1
+                pred = F.pad(pred, (pad_w1, pad_w2, pad_h1, pad_h2), mode='reflect')
+                # Now resize back to original
+                pred = F.interpolate(pred, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
+            else:  # Was padded, now crop
+                # First resize back to original
+                pred = F.interpolate(pred, size=(orig_h, orig_w), mode='bilinear', align_corners=False)
+                # Then crop the padding
+                diff_h, diff_w = orig_h - int(H * scale), orig_w - int(W * scale)
+                start_h, start_w = diff_h // 2, diff_w // 2
+                pred = pred[:, :, start_h:start_h+H, start_w:start_w+W]
+        
+        return pred
+        
     def evaluate(self) -> Dict[str, Any]:
-        """Evaluate model on the dataloader.
+        """Evaluate model on dataloader.
         
         Returns:
             Dictionary with evaluation results
         """
+        if self.model is None:
+            self.logger.error("No model provided for evaluation")
+            return {}
+        
         self.logger.info("Starting evaluation")
         self.model.eval()
         
-        # Lists to store predictions, masks, and images
+        # Storage for predictions and ground truth
         all_preds = []
         all_masks = []
         all_images = []
         
-        # For cup-to-disc ratio calculation
-        cdrs = []
+        # Metrics for accumulation
+        metrics_sum = {
+            'dice': 0.0,
+            'iou': 0.0,
+            'accuracy': 0.0,
+            'precision': 0.0,
+            'recall': 0.0, 
+            'f1': 0.0
+        }
         
-        # For confusion matrix elements
-        total_tp = 0
-        total_fp = 0
-        total_tn = 0
-        total_fn = 0
+        # Total number of samples and pixels
+        num_samples = 0
+        confusion_matrix = np.zeros((2, 2), dtype=np.int64)  # [[tn, fp], [fn, tp]]
         
-        batch_metrics = []
-        
+        # Evaluation loop
         with torch.no_grad():
             for batch_idx, (images, masks) in enumerate(tqdm(self.dataloader, desc="Evaluating")):
-                # Move to device
+                # Move inputs to device
                 images = images.to(self.device)
                 masks = masks.to(self.device)
                 
-                # Forward pass
-                outputs = self.model(images)
+                if self.use_tta:
+                    # Get predictions with test-time augmentation
+                    batch_preds = self._predict_with_tta(images)
+                else:
+                    # Get model predictions without TTA
+                    outputs = self.model(images)
+                    
+                    # Convert to numpy for metrics calculation
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]  # Handle models that return multiple outputs
+                    
+                    # Apply sigmoid for binary segmentation
+                    batch_preds = torch.sigmoid(outputs)
                 
-                # Apply sigmoid to get probabilities
-                probs = torch.sigmoid(outputs)
-                
-                # Apply threshold to get binary predictions
-                preds = (probs > self.threshold).float()
-                
-                # Calculate batch metrics
-                batch_result = self._calculate_batch_metrics(preds, masks)
-                batch_metrics.append(batch_result)
-                
-                # Update confusion matrix elements
-                total_tp += batch_result.get('true_positives', 0)
-                total_fp += batch_result.get('false_positives', 0)
-                total_tn += batch_result.get('true_negatives', 0)
-                total_fn += batch_result.get('false_negatives', 0)
-                
-                # Store predictions, masks, and images for later visualization
-                # Detach and move to CPU to avoid GPU memory issues
-                all_preds.append(probs.cpu())
+                # Store for later visualization and metric calculation
+                all_preds.append(batch_preds.cpu())
                 all_masks.append(masks.cpu())
                 all_images.append(images.cpu())
                 
-                # Calculate cup-to-disc ratio if configured
-                if getattr(self.config, 'calculate_cdr', False):
-                    batch_cdrs = [calculate_cdr(pred, mask) for pred, mask in zip(preds, masks)]
-                    cdrs.extend(batch_cdrs)
+                # Calculate metrics for this batch
+                for i in range(images.size(0)):
+                    pred = batch_preds[i].cpu()
+                    mask = masks[i].cpu()
+                    
+                    # Calculate metrics
+                    batch_metrics = calculate_metrics(pred, mask, threshold=self.threshold)
+                    
+                    # Update metrics sum
+                    for metric, value in batch_metrics.items():
+                        if metric in metrics_sum:
+                            metrics_sum[metric] += value
+                    
+                    # Update confusion matrix elements
+                    tn, fp, fn, tp = calculate_confusion_matrix_elements(pred, mask)
+                    confusion_matrix[0, 0] += tn
+                    confusion_matrix[0, 1] += fp
+                    confusion_matrix[1, 0] += fn
+                    confusion_matrix[1, 1] += tp
+                    
+                    num_samples += 1
+    
+    def _predict_with_tta(self, images: torch.Tensor) -> torch.Tensor:
+        """Make predictions with test-time augmentation.
+        
+        Args:
+            images: Input image tensor
+            
+        Returns:
+            Aggregated prediction after test-time augmentation
+        """
+        batch_size = images.size(0)
+        output_shape = list(images.shape)
+        output_shape[1] = 1  # Change channel dim to 1 for output mask
+        
+        # Initialize tensors for accumulated predictions
+        accumulated_preds = torch.zeros(output_shape).to(self.device)
+        accumulation_count = torch.zeros(output_shape).to(self.device)
+        
+        # Process each image in the batch
+        for i in range(batch_size):
+            img = images[i:i+1]  # Keep batch dimension
+            
+            # Apply augmentations
+            augmented_imgs, transforms_info = self._apply_tta(img)
+            
+            # Get predictions for each augmentation
+            for aug_img, transform_info in zip(augmented_imgs, transforms_info):
+                # Pass through model
+                aug_output = self.model(aug_img)
                 
-                # Log progress every 10 batches
-                if (batch_idx + 1) % 10 == 0:
-                    self.logger.info(f"Evaluated {batch_idx + 1} batches")
+                if isinstance(aug_output, tuple):
+                    aug_output = aug_output[0]
+                    
+                # Apply sigmoid
+                aug_pred = torch.sigmoid(aug_output)
+                
+                # Revert the augmentation
+                reverted_pred = self._reverse_augmentation(aug_pred, transform_info)
+                
+                # Accumulate predictions
+                accumulated_preds[i:i+1] += reverted_pred
+                accumulation_count[i:i+1] += 1
         
-        # Concatenate all tensors
-        all_preds = torch.cat(all_preds, dim=0)
-        all_masks = torch.cat(all_masks, dim=0)
-        all_images = torch.cat(all_images, dim=0)
+        # Average the predictions
+        batch_preds = accumulated_preds / accumulation_count
         
-        # Calculate overall metrics
-        results = self._calculate_overall_metrics(batch_metrics)
-        
-        # Add confusion matrix elements
-        results['confusion_matrix'] = [[total_tn, total_fp], [total_fn, total_tp]]
-        
-        # Add cup-to-disc ratio if calculated
-        if cdrs:
-            results['mean_cdr'] = np.mean(cdrs)
-            results['median_cdr'] = np.median(cdrs)
-            results['cdr_std'] = np.std(cdrs)
-            results['cdr_values'] = cdrs
-        
-        # Generate visualizations if configured
-        if getattr(self.config, 'generate_visualizations', True):
-            self._generate_visualizations(all_images, all_masks, all_preds, results, cdrs)
-        
-        # Save results to CSV
-        self._save_results(results)
-        
-        # Log results to wandb if available
-        if self.wandb_logger:
-            self.wandb_logger.log(
-                {k: v for k, v in results.items() if k != 'cdr_values' and not isinstance(v, list)}
-            )
-            
-            # Log confusion matrix
-            self.wandb_logger.log_confusion_matrix(
-                np.array(results['confusion_matrix']), 
-                class_names=['Background', 'Glaucoma']
-            )
-            
-            # Log sample predictions
-            self.wandb_logger.log_images(
-                all_images[:10], 
-                all_masks[:10], 
-                all_preds[:10],
-                num_samples=min(10, len(all_images))
-            )
-        
-        self.logger.info("Evaluation completed")
-        return results
-    
-    def _calculate_batch_metrics(self, preds: torch.Tensor, masks: torch.Tensor) -> Dict[str, float]:
-        """Calculate metrics for a batch.
-        
-        Args:
-            preds: Prediction tensor (binary)
-            masks: Ground truth tensor
-            
-        Returns:
-            Dictionary with batch metrics
-        """
-        # Ensure inputs are on CPU for metric calculation
-        preds_cpu = preds.cpu()
-        masks_cpu = masks.cpu()
-        
-        # Calculate metrics
-        return calculate_metrics(preds_cpu, masks_cpu, threshold=self.threshold)
-    
-    def _calculate_overall_metrics(self, batch_metrics: List[Dict[str, float]]) -> Dict[str, float]:
-        """Calculate overall metrics from batch metrics.
-        
-        Args:
-            batch_metrics: List of batch metric dictionaries
-            
-        Returns:
-            Dictionary with overall metrics
-        """
-        # Initialize results
-        results = {}
-        
-        # Get metrics to average
-        metrics_to_average = ['dice', 'iou', 'accuracy', 'precision', 'recall', 'specificity', 'f1']
+        return batch_preds
         
         # Calculate average metrics
-        for metric in metrics_to_average:
-            values = [batch.get(metric, 0) for batch in batch_metrics if metric in batch]
-            if values:
-                results[metric] = np.mean(values)
+        metrics_avg = {k: v / num_samples for k, v in metrics_sum.items()}
         
-        return results
-    
-    def _generate_visualizations(
-        self, 
-        images: torch.Tensor, 
-        masks: torch.Tensor, 
-        predictions: torch.Tensor,
-        results: Dict[str, Any],
-        cdrs: List[float] = None
-    ) -> None:
-        """Generate and save visualizations.
+        # Calculate additional metrics from confusion matrix
+        tn, fp, fn, tp = confusion_matrix.flatten()
+        total_pixels = np.sum(confusion_matrix)
         
-        Args:
-            images: Batch of images
-            masks: Batch of masks
-            predictions: Batch of predictions
-            results: Evaluation results
-            cdrs: List of CDR values
-        """
-        self.logger.info("Generating visualizations")
+        # Prepare final evaluation results
+        eval_results = {
+            'metrics': metrics_avg,
+            'confusion_matrix': confusion_matrix.tolist(),
+            'true_positives': int(tp),
+            'false_positives': int(fp),
+            'true_negatives': int(tn),
+            'false_negatives': int(fn),
+            'total_samples': num_samples,
+            'total_pixels': int(total_pixels),
+            'threshold': self.threshold
+        }
         
-        # Plot sample predictions
-        num_samples = min(getattr(self.config, 'num_visualization_samples', 10), len(images))
-        self.viz_manager.plot_sample_predictions(
-            images.numpy(), 
-            masks.numpy(), 
-            predictions.numpy(),
-            num_samples=num_samples
-        )
+        # Flatten results for top-level access
+        for metric, value in metrics_avg.items():
+            eval_results[metric] = value
         
-        # Calculate and plot ROC curve
-        try:
-            from sklearn.metrics import roc_curve, auc
-            fpr, tpr, _ = roc_curve(masks.numpy().flatten(), predictions.numpy().flatten())
-            roc_auc = auc(fpr, tpr)
-            self.viz_manager.plot_roc_curve(fpr, tpr, roc_auc)
-        except Exception as e:
-            self.logger.warning(f"Error calculating ROC curve: {e}")
+        # Log evaluation results
+        self._log_results(eval_results)
         
-        # Calculate and plot PR curve
-        try:
-            from sklearn.metrics import precision_recall_curve, average_precision_score
-            precision, recall, _ = precision_recall_curve(masks.numpy().flatten(), predictions.numpy().flatten())
-            pr_auc = average_precision_score(masks.numpy().flatten(), predictions.numpy().flatten())
-            self.viz_manager.plot_pr_curve(precision, recall, pr_auc)
-        except Exception as e:
-            self.logger.warning(f"Error calculating PR curve: {e}")
+        # Generate visualizations
+        if getattr(self.config, 'generate_visualizations', True):
+            self._generate_visualizations(all_images, all_masks, all_preds)
         
-        # Plot confusion matrix
-        if 'confusion_matrix' in results:
-            self.viz_manager.plot_confusion_matrix(np.array(results['confusion_matrix']))
+        # Save evaluation results to file
+        results_path = self.output_dir / "evaluation_results.json"
+        with open(results_path, 'w') as f:
+            json.dump(
+                {k: v for k, v in eval_results.items() if not isinstance(v, np.ndarray)},
+                f, indent=4
+            )
         
-        # Plot CDR distribution if available
-        if cdrs and len(cdrs) > 0:
-            # Create dummy labels - in a real scenario, we would have actual labels
-            labels = np.zeros(len(cdrs))
-            self.viz_manager.plot_cdr_distribution(cdrs, labels)
+        self.logger.info(f"Evaluation completed. Results saved to {results_path}")
         
-        # Generate HTML report
-        report_path = self.viz_manager.generate_report(results)
-        self.logger.info(f"Generated visualization report at {report_path}")
-    
-    def _save_results(self, results: Dict[str, Any]) -> None:
-        """Save evaluation results to CSV.
-        
-        Args:
-            results: Evaluation results
-        """
-        # Filter out non-scalar values
-        scalar_results = {k: v for k, v in results.items() 
-                         if isinstance(v, (int, float)) and not isinstance(v, bool)}
-        
-        # Create dataframe
-        df = pd.DataFrame([scalar_results])
-        
-        # Save to CSV
-        csv_path = self.results_dir / "evaluation_results.csv"
-        df.to_csv(csv_path, index=False)
-        self.logger.info(f"Saved evaluation results to {csv_path}")
-        
-        # Also save as JSON for easier loading
-        json_path = self.results_dir / "evaluation_results.json"
-        with open(json_path, 'w') as f:
-            import json
-            # Handle numpy values
-            serializable_results = {}
-            for k, v in results.items():
-                if isinstance(v, (np.integer, np.floating)):
-                    serializable_results[k] = float(v)
-                elif isinstance(v, list) and len(v) > 0 and isinstance(v[0], (np.integer, np.floating)):
-                    serializable_results[k] = [float(x) for x in v]
-                elif isinstance(v, np.ndarray):
-                    serializable_results[k] = v.tolist()
-                else:
-                    # Skip non-serializable values
-                    if not isinstance(v, (list, dict)) or (isinstance(v, list) and len(v) == 0):
-                        serializable_results[k] = v
-            
-            json.dump(serializable_results, f, indent=4)
-        self.logger.info(f"Saved evaluation results to {json_path}")
+        return eval_results
     
     def evaluate_ensemble(self, models: List[torch.nn.Module]) -> Dict[str, Any]:
-        """Evaluate an ensemble of models.
+        """Evaluate ensemble of models.
         
         Args:
-            models: List of models to ensemble
+            models: List of models in the ensemble
             
         Returns:
             Dictionary with evaluation results
         """
-        self.logger.info(f"Evaluating ensemble of {len(models)} models")
-        
-        # Lists to store predictions, masks, and images
-        all_masks = []
-        all_images = []
-        all_model_preds = []
+        self.logger.info(f"Starting ensemble evaluation with {len(models)} models")
         
         # Move models to device
         models = [model.to(self.device) for model in models]
         
+        # Set models to evaluation mode
+        for model in models:
+            model.eval()
+        
+        # Storage for predictions and ground truth
+        all_ensemble_preds = []
+        all_masks = []
+        all_images = []
+        
+        # Metrics for accumulation
+        metrics_sum = {
+            'dice': 0.0,
+            'iou': 0.0,
+            'accuracy': 0.0,
+            'precision': 0.0, 
+            'recall': 0.0,
+            'f1': 0.0
+        }
+        
+        # Total number of samples
+        num_samples = 0
+        confusion_matrix = np.zeros((2, 2), dtype=np.int64)  # [[tn, fp], [fn, tp]]
+        
+        # Evaluation loop
         with torch.no_grad():
-            for batch_idx, (images, masks) in enumerate(tqdm(self.dataloader, desc="Evaluating Ensemble")):
-                # Move to device
+            for batch_idx, (images, masks) in enumerate(tqdm(self.dataloader, desc="Evaluating ensemble")):
+                # Move inputs to device
                 images = images.to(self.device)
                 masks = masks.to(self.device)
-                
-                # Store masks and images
-                all_masks.append(masks.cpu())
-                all_images.append(images.cpu())
                 
                 # Get predictions from each model
                 model_preds = []
                 for model in models:
-                    model.eval()
                     outputs = model(images)
-                    probs = torch.sigmoid(outputs)
-                    model_preds.append(probs.cpu())
+                    if isinstance(outputs, tuple):
+                        outputs = outputs[0]
+                    
+                    # Apply sigmoid for binary segmentation
+                    model_preds.append(torch.sigmoid(outputs))
                 
-                all_model_preds.append(model_preds)
+                # Ensemble predictions (simple average)
+                ensemble_preds = torch.stack(model_preds).mean(dim=0)
                 
-                # Log progress every 10 batches
-                if (batch_idx + 1) % 10 == 0:
-                    self.logger.info(f"Evaluated {batch_idx + 1} batches")
+                # Store for later visualization and metric calculation
+                all_ensemble_preds.append(ensemble_preds.cpu())
+                all_masks.append(masks.cpu())
+                all_images.append(images.cpu())
+                
+                # Calculate metrics for this batch
+                for i in range(images.size(0)):
+                    pred = ensemble_preds[i].cpu()
+                    mask = masks[i].cpu()
+                    
+                    # Calculate metrics
+                    batch_metrics = calculate_metrics(pred, mask, threshold=self.threshold)
+                    
+                    # Update metrics sum
+                    for metric, value in batch_metrics.items():
+                        if metric in metrics_sum:
+                            metrics_sum[metric] += value
+                    
+                    # Update confusion matrix elements
+                    tn, fp, fn, tp = calculate_confusion_matrix_elements(pred, mask)
+                    confusion_matrix[0, 0] += tn
+                    confusion_matrix[0, 1] += fp
+                    confusion_matrix[1, 0] += fn
+                    confusion_matrix[1, 1] += tp
+                    
+                    num_samples += 1
         
-        # Concatenate all tensors
-        all_masks = torch.cat(all_masks, dim=0)
-        all_images = torch.cat(all_images, dim=0)
+        # Calculate average metrics
+        metrics_avg = {k: v / num_samples for k, v in metrics_sum.items()}
         
-        # Evaluate different ensemble methods
-        ensemble_results = {}
+        # Calculate additional metrics from confusion matrix
+        tn, fp, fn, tp = confusion_matrix.flatten()
         
-        # Average ensemble
-        avg_preds = self._average_ensemble_predictions(all_model_preds)
-        avg_results = self._calculate_batch_metrics((avg_preds > self.threshold).float(), all_masks)
-        ensemble_results['average'] = avg_results
+        # Prepare final evaluation results
+        eval_results = {
+            'metrics': metrics_avg,
+            'confusion_matrix': confusion_matrix.tolist(),
+            'true_positives': int(tp),
+            'false_positives': int(fp),
+            'true_negatives': int(tn),
+            'false_negatives': int(fn),
+            'total_samples': num_samples,
+            'threshold': self.threshold,
+            'ensemble_size': len(models)
+        }
         
-        # Max ensemble
-        max_preds = self._max_ensemble_predictions(all_model_preds)
-        max_results = self._calculate_batch_metrics((max_preds > self.threshold).float(), all_masks)
-        ensemble_results['maximum'] = max_results
+        # Flatten results for top-level access
+        for metric, value in metrics_avg.items():
+            eval_results[metric] = value
         
-        # Weighted ensemble (equal weights as a starting point)
-        weighted_preds = self._weighted_ensemble_predictions(all_model_preds, weights=None)
-        weighted_results = self._calculate_batch_metrics((weighted_preds > self.threshold).float(), all_masks)
-        ensemble_results['weighted'] = weighted_results
+        # Log evaluation results
+        self._log_results(eval_results, is_ensemble=True)
         
-        # Find best ensemble method
-        best_method = max(ensemble_results.keys(), key=lambda k: ensemble_results[k]['dice'])
-        best_results = ensemble_results[best_method]
-        best_preds = locals()[f"{best_method.split('_')[0]}_preds"]
-        
-        self.logger.info(f"Best ensemble method: {best_method} with Dice score {best_results['dice']:.4f}")
-        
-        # Generate visualizations for the best method
+        # Generate visualizations
         if getattr(self.config, 'generate_visualizations', True):
-            self._generate_visualizations(all_images, all_masks, best_preds, best_results)
+            self._generate_visualizations(
+                all_images, all_masks, all_ensemble_preds, 
+                prefix="ensemble_"
+            )
         
-        # Save results
-        self._save_results(best_results)
+        # Save evaluation results to file
+        results_path = self.output_dir / "ensemble_evaluation_results.json"
+        with open(results_path, 'w') as f:
+            json.dump(
+                {k: v for k, v in eval_results.items() if not isinstance(v, np.ndarray)},
+                f, indent=4
+            )
         
-        # Add ensemble method to results
-        best_results['ensemble_method'] = best_method
+        self.logger.info(f"Ensemble evaluation completed. Results saved to {results_path}")
         
-        return best_results
+        return eval_results
     
-    def _average_ensemble_predictions(self, all_model_preds: List[List[torch.Tensor]]) -> torch.Tensor:
-        """Average predictions from multiple models.
+    def _log_results(self, results: Dict[str, Any], is_ensemble: bool = False) -> None:
+        """Log evaluation results.
         
         Args:
-            all_model_preds: List of model predictions for each batch
-            
-        Returns:
-            Averaged predictions
+            results: Dictionary with evaluation results
+            is_ensemble: Whether the results are from ensemble evaluation
         """
-        # Initialize with the structure of the first batch
-        batch_averaged_preds = []
+        # Log to regular logger
+        prefix = "Ensemble " if is_ensemble else ""
+        self.logger.info(f"{prefix}Evaluation Results:")
         
-        for batch_preds in all_model_preds:
-            # Stack predictions from all models for this batch
-            stacked = torch.stack(batch_preds)
-            # Average along model dimension
-            batch_averaged_preds.append(torch.mean(stacked, dim=0))
+        # Log key metrics
+        metrics_str = ", ".join([f"{k}: {v:.4f}" for k, v in results['metrics'].items()])
+        self.logger.info(f"Metrics: {metrics_str}")
         
-        # Concatenate all batches
-        return torch.cat(batch_averaged_preds, dim=0)
+        # Log confusion matrix
+        cm = results['confusion_matrix']
+        self.logger.info(f"Confusion Matrix: [[{cm[0][0]}, {cm[0][1]}], [{cm[1][0]}, {cm[1][1]}]]")
+        
+        # Log to wandb if available
+        if self.wandb_logger is not None:
+            log_dict = {
+                f"{prefix.lower()}eval_{k}": v 
+                for k, v in results.items() 
+                if isinstance(v, (int, float)) and not isinstance(v, bool)
+            }
+            self.wandb_logger.log(log_dict)
+            
+            # Log confusion matrix
+            self.wandb_logger.log_confusion_matrix(
+                np.array(results['confusion_matrix']),
+                class_names=['Background', 'Glaucoma']
+            )
     
-    def _max_ensemble_predictions(self, all_model_preds: List[List[torch.Tensor]]) -> torch.Tensor:
-        """Take maximum prediction from multiple models.
+    def _generate_visualizations(
+        self,
+        images: List[torch.Tensor],
+        masks: List[torch.Tensor], 
+        preds: List[torch.Tensor],
+        prefix: str = ""
+    ) -> None:
+        """Generate visualizations from evaluation results.
         
         Args:
-            all_model_preds: List of model predictions for each batch
-            
-        Returns:
-            Maximum predictions
+            images: List of image tensors
+            masks: List of ground truth mask tensors
+            preds: List of prediction tensors
+            prefix: Prefix for output filenames
         """
-        batch_max_preds = []
+        # Calculate number of samples to visualize
+        num_samples = min(
+            getattr(self.config, 'sample_count', 10),
+            len(self.dataloader.dataset)
+        )
         
-        for batch_preds in all_model_preds:
-            # Stack predictions from all models for this batch
-            stacked = torch.stack(batch_preds)
-            # Take maximum along model dimension
-            batch_max_preds.append(torch.max(stacked, dim=0)[0])
+        # Concatenate tensors from batches
+        all_images = torch.cat(images, dim=0).numpy()
+        all_masks = torch.cat(masks, dim=0).numpy()
+        all_preds = torch.cat(preds, dim=0).numpy()
         
-        # Concatenate all batches
-        return torch.cat(batch_max_preds, dim=0)
-    
-    def _weighted_ensemble_predictions(
-        self, 
-        all_model_preds: List[List[torch.Tensor]], 
-        weights: Optional[List[float]] = None
-    ) -> torch.Tensor:
-        """Compute weighted predictions from multiple models.
+        # Generate sample prediction visualizations
+        self.visualization_manager.plot_sample_predictions(
+            all_images[:num_samples],
+            all_masks[:num_samples],
+            all_preds[:num_samples],
+            output_filename=f"{prefix}sample_predictions.png"
+        )
         
-        Args:
-            all_model_preds: List of model predictions for each batch
-            weights: Optional list of weights for each model
+        # Prepare data for ROC and PR curves
+        all_masks_flat = all_masks.reshape(-1)
+        all_preds_flat = all_preds.reshape(-1)
+        
+        # Generate ROC curve
+        fpr, tpr, roc_auc = calculate_roc_curve(all_preds_flat, all_masks_flat)
+        self.visualization_manager.plot_roc_curve(
+            fpr, tpr, roc_auc,
+            output_filename=f"{prefix}roc_curve.png"
+        )
+        
+        # Generate PR curve
+        precision, recall, pr_auc = calculate_pr_curve(all_preds_flat, all_masks_flat)
+        self.visualization_manager.plot_pr_curve(
+            precision, recall, pr_auc,
+            output_filename=f"{prefix}pr_curve.png"
+        )
+        
+        # Generate confusion matrix visualization
+        tn, fp, fn, tp = calculate_confusion_matrix_elements(
+            torch.tensor(all_preds_flat), 
+            torch.tensor(all_masks_flat)
+        )
+        cm = np.array([[tn, fp], [fn, tp]])
+        self.visualization_manager.plot_confusion_matrix(
+            cm,
+            output_filename=f"{prefix}confusion_matrix.png"
+        )
+        
+        # Generate HTML report
+        self.visualization_manager.generate_report(
+            {
+                'dice': np.mean([calculate_metrics(p, m, threshold=self.threshold)['dice'] 
+                              for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'iou': np.mean([calculate_metrics(p, m, threshold=self.threshold)['iou'] 
+                             for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'accuracy': np.mean([calculate_metrics(p, m, threshold=self.threshold)['accuracy'] 
+                                 for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'precision': np.mean([calculate_metrics(p, m, threshold=self.threshold)['precision'] 
+                                   for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'recall': np.mean([calculate_metrics(p, m, threshold=self.threshold)['recall'] 
+                                for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'f1': np.mean([calculate_metrics(p, m, threshold=self.threshold)['f1'] 
+                           for p, m in zip(all_preds[:num_samples], all_masks[:num_samples])]),
+                'roc_auc': roc_auc,
+                'pr_auc': pr_auc
+            },
+            output_filename=f"{prefix}evaluation_report.html"
+        )
+        
+        # Log to wandb if available
+        if self.wandb_logger is not None:
+            # Log ROC curve
+            self.wandb_logger.log_roc_curve(fpr, tpr, roc_auc)
             
-        Returns:
-            Weighted predictions
-        """
-        num_models = len(all_model_preds[0])
-        
-        # If weights not provided, use equal weights
-        if weights is None:
-            weights = [1.0 / num_models] * num_models
-        
-        # Normalize weights to sum to 1
-        weights = [w / sum(weights) for w in weights]
-        
-        batch_weighted_preds = []
-        
-        for batch_preds in all_model_preds:
-            # Compute weighted sum
-            weighted_sum = sum(w * pred for w, pred in zip(weights, batch_preds))
-            batch_weighted_preds.append(weighted_sum)
-        
-        # Concatenate all batches
-        return torch.cat(batch_weighted_preds, dim=0)
+            # Log PR curve
+            self.wandb_logger.log_pr_curve(precision, recall, pr_auc)
+            
+            # Log sample images
+            indices = np.random.choice(len(all_images), min(5, len(all_images)), replace=False)
+            self.wandb_logger.log_images(
+                [all_images[i] for i in indices],
+                [all_masks[i] for i in indices],
+                [all_preds[i] for i in indices],
+                num_samples=len(indices)
+            )

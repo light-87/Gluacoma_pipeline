@@ -1,26 +1,66 @@
-# glaucoma/evaluation/visualization.py
+"""
+Visualization Module
+
+Implements visualization utilities for glaucoma detection models.
+This module combines the previous visualization.py and visualization_enhanced.py.
+"""
+
 import numpy as np
 import matplotlib.pyplot as plt
 import seaborn as sns
 from pathlib import Path
-import torch
-import cv2
+import os
+import datetime
 from typing import Dict, List, Tuple, Optional, Union, Any
+import cv2
 
 class VisualizationManager:
     """Manager for generating visualizations of model results."""
     
-    def __init__(self, output_dir: str):
+    def __init__(
+        self, 
+        output_dir: str,
+        create_subdirs: bool = True,
+        fig_size: Tuple[int, int] = (10, 8),
+        dpi: int = 150
+    ):
         """Initialize the visualization manager.
         
         Args:
             output_dir: Directory to save visualizations
+            create_subdirs: Whether to create subdirectories for different visualization types
+            fig_size: Default figure size for plots
+            dpi: Default DPI for saved figures
         """
         self.output_dir = Path(output_dir)
+        self.output_dir.mkdir(exist_ok=True, parents=True)
+        
+        # Create visualization subdirectory
         self.viz_dir = self.output_dir / "visualizations"
         self.viz_dir.mkdir(exist_ok=True, parents=True)
         
-        # Set default matplotlib style with fallback options
+        # Create subdirectories for different visualization types
+        if create_subdirs:
+            self.prediction_dir = self.viz_dir / "predictions"
+            self.curve_dir = self.viz_dir / "curves"
+            self.matrix_dir = self.viz_dir / "matrices"
+            self.distribution_dir = self.viz_dir / "distributions"
+            
+            self.prediction_dir.mkdir(exist_ok=True)
+            self.curve_dir.mkdir(exist_ok=True)
+            self.matrix_dir.mkdir(exist_ok=True)
+            self.distribution_dir.mkdir(exist_ok=True)
+        else:
+            self.prediction_dir = self.viz_dir
+            self.curve_dir = self.viz_dir
+            self.matrix_dir = self.viz_dir
+            self.distribution_dir = self.viz_dir
+        
+        # Set default plotting parameters
+        self.fig_size = fig_size
+        self.dpi = dpi
+        
+        # Set matplotlib style
         try:
             # Try different seaborn style variants
             for style_name in ['seaborn-v0_8', 'seaborn-v0_8-darkgrid', 'seaborn', 'ggplot']:
@@ -32,138 +72,248 @@ class VisualizationManager:
         except:
             # Final fallback to default style
             print("Warning: Could not set custom matplotlib style, using default")
+        
+        # Store paths to generated visualizations
+        self.visualization_paths = {
+            'predictions': [],
+            'curves': [],
+            'matrices': [],
+            'distributions': []
+        }
     
-    def plot_training_history(self, history_file: Union[str, Path]) -> Optional[Path]:
-        """Plot training metrics history from CSV logs.
+    def _prepare_save_path(self, output_dir: Path, filename: str) -> Path:
+        """Prepare save path with timestamp if file exists.
         
         Args:
-            history_file: Path to training history CSV file
+            output_dir: Directory to save file
+            filename: Base filename
             
         Returns:
-            Path to saved visualization file
+            Path to save file
         """
-        import pandas as pd
-        history_path = Path(history_file)
-        if not history_path.exists():
-            print(f"Training history file not found: {history_path}")
-            return None
+        # Split filename and extension
+        name, ext = os.path.splitext(filename)
         
-        # Load training history
-        try:
-            history = pd.read_csv(history_path)
-        except Exception as e:
-            print(f"Error loading training history: {e}")
-            return None
+        # Check if file exists
+        output_path = output_dir / filename
+        if output_path.exists():
+            # Add timestamp to filename
+            timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            output_path = output_dir / f"{name}_{timestamp}{ext}"
         
-        # Determine which metrics to plot
-        metrics = []
-        for col in history.columns:
-            # Skip non-metric columns
-            if col in ['epoch', 'step']:
-                continue
-            
-            # Check if there's a validation version of this metric
-            base_metric = col.replace('train_', '').replace('val_', '')
-            if f"train_{base_metric}" in history.columns and f"val_{base_metric}" in history.columns:
-                metrics.append(base_metric)
-        
-        # Create subplots for each metric
-        n_metrics = len(metrics)
-        if n_metrics == 0:
-            print("No training metrics found in history file")
-            return None
-        
-        fig, axes = plt.subplots(n_metrics, 1, figsize=(10, 4 * n_metrics), dpi=100)
-        if n_metrics == 1:
-            axes = [axes]  # Make sure axes is always a list
-        
-        # Plot each metric
-        for i, metric in enumerate(metrics):
-            ax = axes[i]
-            
-            # Get train and val columns
-            train_col = f"train_{metric}"
-            val_col = f"val_{metric}"
-            
-            # Plot if available
-            if train_col in history.columns:
-                history.plot(x='epoch', y=train_col, ax=ax, label=f'Training {metric}', color='blue')
-            if val_col in history.columns:
-                history.plot(x='epoch', y=val_col, ax=ax, label=f'Validation {metric}', color='orange')
-            
-            ax.set_title(f'{metric.capitalize()} over Training')
-            ax.set_xlabel('Epoch')
-            ax.set_ylabel(metric.capitalize())
-            ax.legend()
-            ax.grid(True, alpha=0.3)
-        
-        # Save figure
-        output_path = self.viz_dir / "training_history.png"
-        plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
-        plt.close(fig)
-        
-        print(f"Training history visualization saved to {output_path}")
         return output_path
     
-    def plot_roc_curve(self, fpr, tpr, roc_auc, output_name: str = 'roc_curve.png') -> Path:
+    def plot_sample_predictions(
+        self, 
+        images: np.ndarray, 
+        masks: np.ndarray, 
+        predictions: np.ndarray,
+        num_samples: int = 5,
+        overlay_alpha: float = 0.5,
+        output_filename: str = "sample_predictions.png"
+    ) -> Path:
+        """Plot sample predictions with ground truth and overlay.
+        
+        Args:
+            images: Batch of images (b, h, w, 3) or (b, 3, h, w)
+            masks: Batch of masks (b, h, w) or (b, 1, h, w)
+            predictions: Batch of predictions (b, h, w) or (b, 1, h, w)
+            num_samples: Number of samples to plot
+            overlay_alpha: Alpha value for overlay
+            output_filename: Name of output file
+            
+        Returns:
+            Path to saved visualization
+        """
+        # Handle different input formats
+        if images.shape[1] == 3 and images.ndim == 4:  # (b, 3, h, w)
+            images = np.transpose(images, (0, 2, 3, 1))
+        
+        if masks.ndim == 4 and masks.shape[1] == 1:  # (b, 1, h, w)
+            masks = masks.squeeze(1)
+        
+        if predictions.ndim == 4 and predictions.shape[1] == 1:  # (b, 1, h, w)
+            predictions = predictions.squeeze(1)
+        
+        # Normalize images if needed
+        if images.max() <= 1.0:
+            images = images * 255
+        
+        # Apply threshold to predictions
+        if np.issubdtype(predictions.dtype, np.floating):
+            pred_binary = (predictions > 0.5).astype(np.float32)
+        else:
+            pred_binary = predictions.astype(np.float32)
+        
+        # Get indices for visualization
+        num_samples = min(num_samples, len(images))
+        indices = np.random.choice(len(images), num_samples, replace=False)
+        
+        # Create figure with subplots
+        fig, axes = plt.subplots(num_samples, 4, figsize=(16, 4 * num_samples))
+        
+        # Adjust for single sample case
+        if num_samples == 1:
+            axes = np.expand_dims(axes, axis=0)
+        
+        # Plot each sample
+        for i, idx in enumerate(indices):
+            # Get data for this sample
+            image = images[idx].astype(np.uint8)
+            mask = masks[idx]
+            pred = predictions[idx]
+            pred_bin = pred_binary[idx]
+            
+            # Plot original image
+            axes[i, 0].imshow(image)
+            axes[i, 0].set_title(f'Sample {idx}: Original Image')
+            axes[i, 0].axis('off')
+            
+            # Plot ground truth mask
+            axes[i, 1].imshow(mask, cmap='gray')
+            axes[i, 1].set_title('Ground Truth')
+            axes[i, 1].axis('off')
+            
+            # Plot prediction (probability)
+            axes[i, 2].imshow(pred, cmap='plasma')
+            axes[i, 2].set_title('Prediction (Prob)')
+            axes[i, 2].axis('off')
+            
+            # Plot overlay
+            overlay = self._create_overlay(image, pred_bin, mask, alpha=overlay_alpha)
+            axes[i, 3].imshow(overlay)
+            axes[i, 3].set_title('Overlay (Green=GT, Red=Pred)')
+            axes[i, 3].axis('off')
+        
+        # Adjust layout
+        plt.tight_layout()
+        
+        # Save figure
+        output_path = self._prepare_save_path(self.prediction_dir, output_filename)
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close(fig)
+        
+        # Store path
+        self.visualization_paths['predictions'].append(output_path)
+        
+        return output_path
+    
+    def _create_overlay(
+        self, 
+        image: np.ndarray, 
+        pred: np.ndarray, 
+        target: np.ndarray,
+        alpha: float = 0.5
+    ) -> np.ndarray:
+        """Create overlay of prediction and ground truth on image.
+        
+        Args:
+            image: Original image (HxWxC)
+            pred: Prediction mask (HxW)
+            target: Ground truth mask (HxW)
+            alpha: Alpha value for overlay
+            
+        Returns:
+            Overlay image
+        """
+        # Create copy of image and convert to float for blending
+        overlay = image.copy().astype(np.float32) / 255.0
+        
+        # Create RGB masks
+        h, w = pred.shape[:2]
+        pred_mask = np.zeros((h, w, 3), dtype=np.float32)
+        pred_mask[..., 0] = pred  # Red channel for predictions
+        
+        target_mask = np.zeros((h, w, 3), dtype=np.float32)
+        target_mask[..., 1] = target  # Green channel for ground truth
+        
+        # Blend with image
+        overlay = overlay * (1 - alpha) + pred_mask * alpha * 0.8  # Slightly reduce prediction intensity
+        overlay = overlay * (1 - alpha) + target_mask * alpha
+        
+        # Clip to valid RGB range
+        overlay = np.clip(overlay, 0, 1)
+        
+        return overlay
+    
+    def plot_roc_curve(
+        self, 
+        fpr: np.ndarray, 
+        tpr: np.ndarray, 
+        roc_auc: float, 
+        output_filename: str = 'roc_curve.png'
+    ) -> Path:
         """Plot ROC curve.
         
         Args:
             fpr: False positive rates
             tpr: True positive rates
             roc_auc: Area under the ROC curve
-            output_name: Name of output file
+            output_filename: Name of output file
             
         Returns:
-            Path to saved image
+            Path to saved visualization
         """
-        plt.figure(figsize=(8, 8))
-        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC curve (AUC = {roc_auc:.3f})')
-        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--')
+        plt.figure(figsize=self.fig_size)
+        plt.plot(fpr, tpr, color='darkorange', lw=2, label=f'ROC Curve (AUC = {roc_auc:.3f})')
+        plt.plot([0, 1], [0, 1], color='navy', lw=2, linestyle='--', label='Random Classifier')
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
-        plt.xlabel('False Positive Rate')
-        plt.ylabel('True Positive Rate')
-        plt.title('Receiver Operating Characteristic (ROC) Curve')
-        plt.legend(loc="lower right")
+        plt.xlabel('False Positive Rate', fontsize=12)
+        plt.ylabel('True Positive Rate', fontsize=12)
+        plt.title('Receiver Operating Characteristic (ROC) Curve', fontsize=14)
+        plt.legend(loc="lower right", fontsize=12)
         plt.grid(True, alpha=0.3)
         
         # Save figure
-        output_path = self.viz_dir / output_name
+        output_path = self._prepare_save_path(self.curve_dir, output_filename)
         plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
+        
+        # Store path
+        self.visualization_paths['curves'].append(output_path)
         
         return output_path
     
-    def plot_pr_curve(self, precision, recall, pr_auc, output_name: str = 'pr_curve.png') -> Path:
+    def plot_pr_curve(
+        self, 
+        precision: np.ndarray, 
+        recall: np.ndarray, 
+        pr_auc: float, 
+        output_filename: str = 'pr_curve.png'
+    ) -> Path:
         """Plot precision-recall curve.
         
         Args:
             precision: Precision values
             recall: Recall values
             pr_auc: Area under the PR curve
-            output_name: Name of output file
+            output_filename: Name of output file
             
         Returns:
-            Path to saved image
+            Path to saved visualization
         """
-        plt.figure(figsize=(8, 8))
-        plt.plot(recall, precision, color='blue', lw=2, label=f'PR curve (AUC = {pr_auc:.3f})')
+        plt.figure(figsize=self.fig_size)
+        plt.plot(recall, precision, color='blue', lw=2, label=f'PR Curve (AUC = {pr_auc:.3f})')
+        plt.axhline(y=np.sum(recall > 0) / len(recall), color='red', linestyle='--', 
+                  label='Random Classifier')
         plt.xlim([0.0, 1.0])
         plt.ylim([0.0, 1.05])
-        plt.xlabel('Recall')
-        plt.ylabel('Precision')
-        plt.title('Precision-Recall Curve')
-        plt.legend(loc="lower left")
+        plt.xlabel('Recall', fontsize=12)
+        plt.ylabel('Precision', fontsize=12)
+        plt.title('Precision-Recall Curve', fontsize=14)
+        plt.legend(loc="lower left", fontsize=12)
         plt.grid(True, alpha=0.3)
         
         # Save figure
-        output_path = self.viz_dir / output_name
+        output_path = self._prepare_save_path(self.curve_dir, output_filename)
         plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
+        
+        # Store path
+        self.visualization_paths['curves'].append(output_path)
         
         return output_path
     
@@ -185,19 +335,16 @@ class VisualizationManager:
         Returns:
             Path to saved visualization
         """
-        # Convert cm to integer to resolve formatting issue
-        cm_int = np.round(cm).astype(int)
-        
         # Normalize if requested
-        if normalize and cm_int.sum() > 0:
-            cm_norm = cm_int.astype('float') / cm_int.sum(axis=1)[:, np.newaxis]
+        if normalize and cm.sum() > 0:
+            cm_norm = cm.astype('float') / cm.sum(axis=1)[:, np.newaxis]
             cm_display = cm_norm
             fmt = '.2f'
         else:
-            cm_display = cm_int
+            cm_display = cm
             fmt = 'd'
         
-        plt.figure(figsize=(8, 6))
+        plt.figure(figsize=self.fig_size)
         
         # Create heatmap
         sns.heatmap(
@@ -215,206 +362,213 @@ class VisualizationManager:
         plt.title('Confusion Matrix', fontsize=14)
         
         # Save figure
-        output_path = self.viz_dir / output_filename
+        output_path = self._prepare_save_path(self.matrix_dir, output_filename)
         plt.tight_layout()
-        plt.savefig(output_path, dpi=200, bbox_inches='tight')
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
         plt.close()
+        
+        # Store path
+        self.visualization_paths['matrices'].append(output_path)
         
         return output_path
     
-    def plot_sample_predictions(self, 
-                             images: np.ndarray, 
-                             masks: np.ndarray, 
-                             predictions: np.ndarray,
-                             num_samples: int = 5) -> List[Path]:
-        """Plot sample predictions with ground truth and overlay.
+    def plot_metrics_over_epochs(
+        self, 
+        metrics_dict: Dict[str, List[float]],
+        output_filename: str = 'training_metrics.png'
+    ) -> Path:
+        """Plot metrics over training epochs.
         
         Args:
-            images: Batch of images (b, h, w, 3) or (b, 3, h, w)
-            masks: Batch of masks (b, h, w) or (b, 1, h, w)
-            predictions: Batch of predictions (b, h, w) or (b, 1, h, w)
-            num_samples: Number of samples to plot
+            metrics_dict: Dictionary mapping metric names to lists of values
+            output_filename: Name of output file
             
         Returns:
-            List of paths to saved visualizations
+            Path to saved visualization
         """
-        # Handle different input formats
-        if images.shape[1] == 3 and len(images.shape) == 4:  # (b, 3, h, w)
-            images = np.transpose(images, (0, 2, 3, 1))
+        # Filter out non-scalar metrics
+        metrics_to_plot = {}
+        for name, values in metrics_dict.items():
+            if isinstance(values, list) and all(isinstance(v, (int, float)) for v in values):
+                metrics_to_plot[name] = values
         
-        if len(masks.shape) == 4 and masks.shape[1] == 1:  # (b, 1, h, w)
-            masks = masks.squeeze(1)
+        # Calculate number of metrics to plot
+        n_metrics = len(metrics_to_plot)
         
-        if len(predictions.shape) == 4 and predictions.shape[1] == 1:  # (b, 1, h, w)
-            predictions = predictions.squeeze(1)
+        if n_metrics == 0:
+            print("No valid metrics to plot.")
+            return None
         
-        # Normalize images if needed
-        if images.max() <= 1.0:
-            images = images * 255
+        # Calculate grid layout
+        n_cols = 2
+        n_rows = (n_metrics + n_cols - 1) // n_cols
         
-        # Get indices for visualization
-        num_samples = min(num_samples, len(images))
-        indices = np.random.choice(len(images), num_samples, replace=False)
+        # Create figure
+        fig, axes = plt.subplots(n_rows, n_cols, figsize=(12, 4 * n_rows))
         
-        output_paths = []
+        # Convert to 2D array if needed
+        if n_rows == 1 and n_cols == 1:
+            axes = np.array([[axes]])
+        elif n_rows == 1 or n_cols == 1:
+            axes = np.array(axes).reshape(n_rows, n_cols)
         
-        # Create visualizations for each sample
-        for i, idx in enumerate(indices):
-            image = images[idx].astype(np.uint8)
-            mask = masks[idx]
-            pred = predictions[idx]
+        # Plot each metric
+        for i, (name, values) in enumerate(metrics_to_plot.items()):
+            row, col = divmod(i, n_cols)
+            ax = axes[row, col]
             
-            # Create figure
-            fig, axes = plt.subplots(1, 4, figsize=(16, 4))
+            # Create x-axis values (epochs)
+            epochs = np.arange(1, len(values) + 1)
             
-            # Plot original image
-            axes[0].imshow(image)
-            axes[0].set_title('Original Image')
-            axes[0].axis('off')
+            # Plot metric
+            ax.plot(epochs, values, 'o-', linewidth=2, markersize=4)
             
-            # Plot ground truth mask
-            axes[1].imshow(mask, cmap='gray')
-            axes[1].set_title('Ground Truth')
-            axes[1].axis('off')
+            # Add trend line
+            try:
+                from scipy.signal import savgol_filter
+                if len(values) > 5:
+                    window_size = min(len(values)-2 if len(values) % 2 == 0 else len(values)-1, 11)
+                    if window_size > 2:
+                        smoothed = savgol_filter(values, window_size, 3)
+                        ax.plot(epochs, smoothed, 'r--', linewidth=1.5, alpha=0.6)
+            except ImportError:
+                pass
             
-            # Plot prediction
-            axes[2].imshow(pred, cmap='gray')
-            axes[2].set_title('Prediction')
-            axes[2].axis('off')
+            # Add labels and grid
+            ax.set_title(name, fontsize=12)
+            ax.set_xlabel('Epoch', fontsize=10)
+            ax.set_ylabel('Value', fontsize=10)
+            ax.grid(True, alpha=0.3)
             
-            # Plot overlay
-            overlay = self._create_overlay(image, pred, mask)
-            axes[3].imshow(overlay)
-            axes[3].set_title('Overlay (Green=GT, Red=Pred)')
-            axes[3].axis('off')
-            
-            # Save figure
-            output_path = self.viz_dir / f"sample_{i}.png"
-            plt.tight_layout()
-            plt.savefig(output_path, dpi=200, bbox_inches='tight')
-            plt.close(fig)
-            
-            output_paths.append(output_path)
+            # Add min/max markers
+            if len(values) > 0:
+                min_idx = np.argmin(values)
+                max_idx = np.argmax(values)
+                
+                ax.plot(epochs[min_idx], values[min_idx], 'v', color='blue', markersize=8,
+                       label=f'Min: {values[min_idx]:.4f}')
+                ax.plot(epochs[max_idx], values[max_idx], '^', color='red', markersize=8,
+                       label=f'Max: {values[max_idx]:.4f}')
+                ax.legend(fontsize=8)
         
-        return output_paths
+        # Hide unused subplots
+        for i in range(n_metrics, n_rows * n_cols):
+            row, col = divmod(i, n_cols)
+            axes[row, col].axis('off')
+        
+        plt.suptitle('Training Metrics', fontsize=16)
+        
+        # Save figure
+        output_path = self._prepare_save_path(self.curve_dir, output_filename)
+        plt.tight_layout(rect=[0, 0, 1, 0.97])  # Make room for suptitle
+        plt.savefig(output_path, dpi=self.dpi, bbox_inches='tight')
+        plt.close(fig)
+        
+        # Store path
+        self.visualization_paths['curves'].append(output_path)
+        
+        return output_path
     
-    def _create_overlay(self, image, pred, target):
-        """Create overlay of prediction and ground truth on image.
-        
-        Args:
-            image: Original image (HxWxC)
-            pred: Prediction mask (HxW)
-            target: Ground truth mask (HxW)
-            
-        Returns:
-            Overlay image
-        """
-        # Copy image
-        overlay = image.copy().astype(np.float32) / 255.0
-        
-        # Create mask for ground truth (green)
-        gt_mask = np.zeros_like(overlay)
-        gt_mask[:, :, 1] = target * 0.7  # Green channel
-        
-        # Create mask for prediction (red)
-        pred_mask = np.zeros_like(overlay)
-        pred_mask[:, :, 0] = pred * 0.7  # Red channel
-        
-        # Overlay
-        overlay = np.clip(overlay * 0.7 + gt_mask + pred_mask, 0, 1)
-        
-        return overlay
-    
-    def generate_report(self, metrics: Dict[str, float], output_name: str = 'report.html') -> Path:
+    def generate_report(
+        self, 
+        metrics: Dict[str, float], 
+        output_filename: str = 'report.html'
+    ) -> Path:
         """Generate HTML report with evaluation results.
         
         Args:
             metrics: Dictionary with evaluation metrics
-            output_name: Name of output file
+            output_filename: Name of output file
             
         Returns:
             Path to saved report
         """
-        # Basic HTML template
+        # Get timestamp
+        timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        
+        # Start HTML content
         html = f"""
         <!DOCTYPE html>
         <html>
         <head>
             <title>Glaucoma Detection Evaluation Report</title>
             <style>
-                body {{ font-family: Arial, sans-serif; margin: 20px; }}
-                h1, h2 {{ color: #2c3e50; }}
-                .metric {{ margin-bottom: 10px; }}
+                body {{ font-family: Arial, sans-serif; margin: 30px; line-height: 1.6; color: #333; max-width: 1200px; margin: 0 auto; }}
+                h1, h2, h3 {{ color: #2c3e50; }}
+                h1 {{ border-bottom: 2px solid #3498db; padding-bottom: 10px; }}
+                h2 {{ border-bottom: 1px solid #ddd; padding-bottom: 8px; margin-top: 30px; }}
+                .metric {{ margin-bottom: 10px; display: flex; justify-content: space-between; }}
                 .metric-name {{ font-weight: bold; }}
-                .metric-value {{ float: right; }}
                 .metrics-container {{ 
                     max-width: 600px; 
                     margin: 20px 0; 
-                    padding: 15px; 
+                    padding: 20px; 
                     border: 1px solid #ddd; 
-                    border-radius: 5px;
+                    border-radius: 8px;
+                    background-color: #f9f9f9;
                 }}
-                .metrics-container:after {{ 
-                    content: ""; 
-                    display: table; 
-                    clear: both; 
+                .visualization {{ margin: 30px 0; }}
+                .visualization h3 {{ margin-bottom: 15px; color: #2980b9; }}
+                img {{ max-width: 100%; border: 1px solid #ddd; border-radius: 8px; box-shadow: 0 4px 8px rgba(0,0,0,0.1); }}
+                .timestamp {{ color: #7f8c8d; margin-top: 30px; font-style: italic; }}
+                .row {{ display: flex; flex-wrap: wrap; margin: 0 -15px; }}
+                .col {{ padding: 0 15px; box-sizing: border-box; }}
+                .col-50 {{ width: 50%; }}
+                @media (max-width: 768px) {{ 
+                    .col-50 {{ width: 100%; }} 
+                    .metrics-container {{ max-width: 100%; }}
                 }}
-                .visualization {{ margin: 20px 0; }}
-                img {{ max-width: 100%; border: 1px solid #ddd; border-radius: 5px; }}
             </style>
         </head>
         <body>
             <h1>Glaucoma Detection Evaluation Report</h1>
+            <div class="timestamp">Generated on: {timestamp}</div>
             
             <h2>Performance Metrics</h2>
             <div class="metrics-container">
         """
         
         # Add metrics
-        for name, value in metrics.items():
-            if isinstance(value, (int, float)):
-                html += f'<div class="metric"><span class="metric-name">{name}</span><span class="metric-value">{value:.4f}</span></div>\n'
+        for name, value in sorted(metrics.items()):
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                formatted_value = f"{value:.4f}" if isinstance(value, float) else str(value)
+                html += f'<div class="metric"><span class="metric-name">{name}</span><span class="metric-value">{formatted_value}</span></div>\n'
         
         html += """
             </div>
             
             <h2>Visualizations</h2>
-            
-            <div class="visualization">
-                <h3>Training History</h3>
-                <img src="visualizations/training_history.png" alt="Training History">
-            </div>
-            
-            <div class="visualization">
-                <h3>Confusion Matrix</h3>
-                <img src="visualizations/confusion_matrix.png" alt="Confusion Matrix">
-            </div>
-            
-            <div class="visualization">
-                <h3>ROC Curve</h3>
-                <img src="visualizations/roc_curve.png" alt="ROC Curve">
-            </div>
-            
-            <div class="visualization">
-                <h3>Precision-Recall Curve</h3>
-                <img src="visualizations/pr_curve.png" alt="Precision-Recall Curve">
-            </div>
-            
-            <h2>Sample Predictions</h2>
+            <div class="row">
         """
         
-        # Add sample predictions
-        sample_paths = list(self.viz_dir.glob("sample_*.png"))
-        for i, path in enumerate(sorted(sample_paths)):
-            html += f'<div class="visualization"><h3>Sample {i+1}</h3><img src="visualizations/{path.name}" alt="Sample {i+1}"></div>\n'
+        # Add visualizations
+        viz_types = [
+            ('curves', 'Performance Curves'),
+            ('matrices', 'Confusion Matrix'),
+            ('predictions', 'Sample Predictions'),
+            ('distributions', 'Distributions')
+        ]
         
+        for viz_type, title in viz_types:
+            if viz_type in self.visualization_paths and self.visualization_paths[viz_type]:
+                html += f'<div class="col col-50"><div class="visualization"><h3>{title}</h3>\n'
+                
+                # Add all visualizations of this type
+                for path in self.visualization_paths[viz_type]:
+                    rel_path = os.path.relpath(path, self.output_dir)
+                    html += f'<img src="{rel_path}" alt="{os.path.basename(path)}">\n'
+                
+                html += '</div></div>\n'
+        
+        # Close HTML
         html += """
+            </div>
         </body>
         </html>
         """
         
         # Save HTML report
-        output_path = self.output_dir / output_name
+        output_path = self._prepare_save_path(self.output_dir, output_filename)
         with open(output_path, 'w') as f:
             f.write(html)
         
