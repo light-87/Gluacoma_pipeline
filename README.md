@@ -1,47 +1,40 @@
-# Glaucoma Detection Pipeline
+# 🧠 Glaucoma Detection Pipeline
 
-A modular machine learning pipeline for automated glaucoma detection from retinal fundus images, using modern libraries and best practices.
+A powerful, modular machine learning pipeline for automated glaucoma detection from retinal fundus images using state-of-the-art techniques.
 
-## Project Overview
+## 🌟 Project Overview
 
-This project implements a clean, efficient pipeline for glaucoma detection from retinal fundus images. The pipeline is built with a focus on:
+This project implements a clean, efficient pipeline for glaucoma detection from retinal fundus images with a focus on:
 
-- **Simplicity**: Clean, readable code with minimal dependencies
-- **Performance**: Memory-efficient data handling and optimized processing
-- **Usability**: Intuitive interfaces and comprehensive documentation
-- **Reproducibility**: Robust experiment tracking and version control
-- **Extensibility**: Easy to add new models, metrics, and visualization types
+- 🧹 **Simplicity**: Clean, readable code with minimal dependencies
+- ⚡ **Performance**: Memory-efficient data handling and optimized processing
+- 🔍 **Accuracy**: Advanced techniques for improved detection performance
+- 📊 **Analysis**: Comprehensive tools for results visualization and interpretation
+- 🔄 **Flexibility**: Easy to extend with new models, metrics, and techniques
 
-### Datasets
+### 📚 Datasets
 
 The pipeline works with three glaucoma datasets:
 
-1. **ORIGA** - Singapore Chinese Eye Study dataset containing fundus images with glaucoma diagnosis
+1. **ORIGA** - Singapore Chinese Eye Study dataset with glaucoma diagnosis
 2. **REFUGE** - Retinal Fundus Glaucoma Challenge dataset with expert annotations
 3. **G1020** - A large collection of retinal images with associated metadata
 
-To maximize consistency, the pipeline focuses on **square images only** from these datasets.
+## 📋 Table of Contents
 
-## Table of Contents
+- [Installation](#-installation)
+- [Quick Start Guide](#-quick-start-guide)
+- [Running the Pipeline](#-running-the-pipeline)
+- [Notebooks & Analysis](#-notebooks--analysis)
+- [Advanced Features](#-advanced-features)
+- [Configuration System](#-configuration-system)
+- [Troubleshooting](#-troubleshooting)
 
-- [Installation](#installation)
-- [Project Structure](#project-structure)
-- [Data Setup](#data-setup)
-- [Usage](#usage)
-- [Configuration System](#configuration-system)
-- [Pipeline Modules](#pipeline-modules)
-- [Run Tracking System](#run-tracking-system)
-- [Memory Optimization](#memory-optimization)
-- [Adding New Components](#adding-new-components)
-- [Ensemble Models](#ensemble-models)
-- [Troubleshooting](#troubleshooting)
-
-## Installation
+## 🛠 Installation
 
 ### Prerequisites
 
 - Python 3.7+
-- pip or conda package manager
 - CUDA-compatible GPU (recommended but optional)
 
 ### Setup
@@ -56,8 +49,13 @@ cd glaucoma-detection
 2. Create a virtual environment:
 
 ```bash
+# Using venv
 python -m venv venv
 source venv/bin/activate  # On Windows: venv\Scripts\activate
+
+# Or using conda
+conda create -n glaucoma python=3.8
+conda activate glaucoma
 ```
 
 3. Install dependencies:
@@ -72,50 +70,350 @@ pip install -r requirements.txt
 pip install -e .
 ```
 
-## Project Structure
+## 🚀 Quick Start Guide
 
-The project follows a modular structure for better organization and maintainability:
+### Running with Default Settings
 
-```
-glaucoma-detection/
-├── README.md                    # Project documentation
-├── requirements.txt             # Dependencies
-├── setup.py                     # Package installation
-├── glaucoma/
-│   ├── __init__.py
-│   ├── config.py                # Configuration system
-│   ├── main.py                  # Main entry point
-│   ├── data/
-│   │   ├── __init__.py
-│   │   ├── loader.py            # Data loading functionality
-│   │   ├── dataset.py           # PyTorch datasets with efficient loading
-│   │   └── augmentation.py      # Data augmentation strategies
-│   ├── models/
-│   │   ├── __init__.py
-│   │   ├── factory.py           # Model creation factory
-│   │   ├── losses.py            # Loss functions
-│   │   └── ensemble.py          # Ensemble model implementations
-│   ├── training/
-│   │   ├── __init__.py
-│   │   └── trainer.py           # Training loop implementation
-│   ├── evaluation/
-│   │   ├── __init__.py
-│   │   ├── evaluator.py         # Evaluation functionality
-│   │   ├── metrics.py           # Evaluation metrics
-│   │   └── visualization.py     # Result visualization
-│   └── utils/
-│       ├── __init__.py
-│       ├── logging.py           # Logging utilities
-│       └── wandb_logger.py      # Weights & Biases integration
-└── notebooks/                   # Optional Jupyter notebooks
-    ├── data_exploration.ipynb
-    ├── model_training.ipynb
-    └── results_analysis.ipynb
+To run the complete pipeline with default settings:
+
+```bash
+python -m glaucoma.main
 ```
 
-## Data Setup
+This will:
+1. Load and preprocess the data
+2. Train a model with default parameters
+3. Evaluate the model's performance
+4. Save results to the output directory
 
-### Dataset Directory Structure
+### Customizing Your Run
+
+For a customized run with specific parameters:
+
+```bash
+python -m glaucoma.main --steps train,evaluate \
+                        --model.architecture unet \
+                        --model.encoder resnet34 \
+                        --training.batch_size 16 \
+                        --training.loss_function combined \
+                        --training.focal_weight 0.5 \
+                        --use-amp
+```
+
+### Using the Batch Script
+
+For Windows users, we provide a batch script for easy execution:
+
+```bash
+# Run the batch script
+./glaucoma/run.bat
+```
+
+## 🏃‍♂️ Running the Pipeline
+
+### Pipeline Steps
+
+You can run specific steps of the pipeline:
+
+```bash
+python -m glaucoma.main --steps [step1,step2,...]
+```
+
+Available steps:
+- `load`: Load data into a consolidated format
+- `preprocess`: Create data loaders and splits
+- `train`: Train the segmentation model
+- `evaluate`: Evaluate model performance on test data
+- `ensemble`: Evaluate ensemble of models (if configured)
+
+### Training Options
+
+The pipeline supports several advanced training options:
+
+```bash
+# Train with mixed precision (faster training on modern GPUs)
+python -m glaucoma.main --steps train --use-amp
+
+# Train with gradient accumulation (for larger effective batch sizes)
+python -m glaucoma.main --steps train --grad-accum-steps 4
+
+# Train with focal loss to address class imbalance
+python -m glaucoma.main --steps train --loss-function focal
+```
+
+### Evaluation with Test-Time Augmentation
+
+For improved evaluation accuracy, use test-time augmentation:
+
+```bash
+python -m glaucoma.main --steps evaluate \
+                        --checkpoint-path output/best_model.pt \
+                        --use-tta
+```
+
+## 📓 Notebooks & Analysis
+
+We provide several Jupyter notebooks for data exploration, model training, and results analysis:
+
+### 1. 📊 Data Exploration Notebook
+
+The `notebooks/data_exploration.md` template helps you analyze and understand your dataset:
+
+- Visualize sample images and masks
+- Analyze class distribution and imbalance
+- Explore image characteristics
+- Generate insights for model training
+
+To convert to an executable notebook:
+
+```bash
+# Convert markdown to notebook
+jupyter nbconvert --to notebook --execute notebooks/data_exploration.md
+```
+
+### 2. 🏋️‍♀️ Model Training Notebook
+
+The `notebooks/model_training.md` template provides a step-by-step guide for training models:
+
+- Configure and train models with different architectures
+- Implement focal loss and other techniques for class imbalance
+- Monitor training progress with visualizations
+- Save and evaluate trained models
+
+### 3. 📈 Results Analysis Notebook
+
+The `notebooks/model_results_analysis.md` template offers comprehensive tools for analyzing results:
+
+- Visualize model predictions and performance metrics
+- Generate ROC curves, PR curves, and confusion matrices
+- Analyze model performance by image characteristics
+- Identify challenging cases for further improvement
+- Compare different models and techniques
+
+```bash
+# Convert and run the analysis notebook
+jupyter nbconvert --to notebook --execute notebooks/model_results_analysis.md
+```
+
+## 🚀 Advanced Features
+
+### ⚖️ Class Imbalance Handling
+
+We implement several techniques to address class imbalance:
+
+```bash
+# Using focal loss
+python -m glaucoma.main --loss-function focal --focal-gamma 2.0 --focal-alpha 0.25
+
+# Using combined loss
+python -m glaucoma.main --loss-function combined \
+                        --dice-weight 1.0 \
+                        --bce-weight 0.5 \
+                        --focal-weight 0.5
+                        
+# Using Tversky loss
+python -m glaucoma.main --loss-function tversky \
+                        --tversky-alpha 0.7 \
+                        --tversky-beta 0.3
+```
+
+### 🔄 Test-Time Augmentation (TTA)
+
+Improve model performance with test-time augmentation:
+
+```bash
+python -m glaucoma.main --steps evaluate --use-tta
+```
+
+TTA parameters can be customized:
+```bash
+python -m glaucoma.main --steps evaluate \
+                        --use-tta \
+                        --evaluation.tta_scales 0.8,1.0,1.2 \
+                        --evaluation.tta_flips True \
+                        --evaluation.tta_rotations 0,90,180,270
+```
+
+### 🚅 Mixed Precision Training
+
+For faster training on modern GPUs:
+
+```bash
+python -m glaucoma.main --use-amp
+```
+
+### 🤝 Ensemble Models
+
+Create and evaluate model ensembles:
+
+```bash
+# Evaluate an ensemble of multiple models
+python -m glaucoma.main --steps ensemble \
+                        --ensemble.models.0.checkpoint_path output/model1/best_model.pt \
+                        --ensemble.models.1.checkpoint_path output/model2/best_model.pt \
+                        --ensemble.ensemble_method average
+```
+
+## ⚙️ Configuration System
+
+### Configuration Structure
+
+The configuration is organized into several sections:
+
+- 📁 **Data**: Dataset paths, splits, etc.
+- 🏗️ **Model**: Architecture, encoder, etc.
+- 🔄 **Preprocessing**: Image size, augmentation, etc.
+- 🏋️‍♀️ **Training**: Batch size, learning rate, loss functions, etc.
+- 📊 **Evaluation**: Metrics, thresholds, test-time augmentation, etc.
+- 📝 **Logging**: Logging settings, Weights & Biases integration, etc.
+
+### Command-line Arguments
+
+Override configuration values via command-line:
+
+```bash
+python -m glaucoma.main --training.batch_size 32 \
+                        --training.learning_rate 0.001 \
+                        --use-amp \
+                        --grad-accum-steps 2
+```
+
+### Configuration Files
+
+Save and load configurations:
+
+```bash
+# Save a config
+python -c "from glaucoma.config import Config; Config().save_json('my_config.json')"
+
+# Load a config
+python -m glaucoma.main --config-file my_config.json
+```
+
+## 🔧 Troubleshooting
+
+### Common Issues and Solutions
+
+1. **Memory Errors** 💾
+   ```bash
+   # Reduce batch size
+   python -m glaucoma.main --training.batch_size 8
+   
+   # Enable gradient accumulation for effective larger batch
+   python -m glaucoma.main --grad-accum-steps 4
+   ```
+
+2. **CUDA Out of Memory** 🔥
+   ```bash
+   # Use mixed precision training
+   python -m glaucoma.main --use-amp
+   
+   # Use a smaller architecture
+   python -m glaucoma.main --model.architecture unet --model.encoder resnet18
+   ```
+
+3. **Slow Training** 🐢
+   ```bash
+   # Use mixed precision
+   python -m glaucoma.main --use-amp
+   
+   # Increase number of workers
+   python -m glaucoma.main --training.num_workers 8
+   ```
+
+4. **Poor Performance** 📉
+   ```bash
+   # Try different loss function
+   python -m glaucoma.main --loss-function combined --focal-weight 0.5
+   
+   # Use test-time augmentation for evaluation
+   python -m glaucoma.main --steps evaluate --use-tta
+   ```
+
+### Learning Rate Tuning
+
+If your model is not learning effectively:
+
+```bash
+# Use one-cycle learning rate scheduler
+python -m glaucoma.main --training.scheduler one_cycle
+
+# Try a different optimizer
+python -m glaucoma.main --training.optimizer adamw
+```
+
+## 📝 Example Use Cases
+
+### 1️⃣ Basic Training and Evaluation
+
+```bash
+# Train a model
+python -m glaucoma.main --steps train,evaluate \
+                        --model.architecture unet \
+                        --training.batch_size 16 \
+                        --training.epochs 30
+
+# Evaluate the model
+python -m glaucoma.main --steps evaluate \
+                        --checkpoint-path output/best_model.pt
+```
+
+### 2️⃣ Advanced Training with Mixed Precision and Focal Loss
+
+```bash
+python -m glaucoma.main --steps train,evaluate \
+                        --model.architecture unet \
+                        --model.encoder efficientnet-b3 \
+                        --loss-function combined \
+                        --focal-weight 0.5 \
+                        --use-amp \
+                        --grad-accum-steps 2
+```
+
+### 3️⃣ Evaluation with Test-Time Augmentation
+
+```bash
+python -m glaucoma.main --steps evaluate \
+                        --checkpoint-path output/best_model.pt \
+                        --use-tta
+```
+
+### 4️⃣ Training with Custom Learning Rate Schedule
+
+```bash
+python -m glaucoma.main --steps train \
+                        --training.scheduler one_cycle \
+                        --training.max_lr 0.01 \
+                        --training.pct_start 0.3
+```
+
+## 📚 Notebook Workflows
+
+### Data Exploration Workflow
+
+1. Convert and open the data exploration notebook
+2. Load and visualize your dataset
+3. Analyze class distribution and image characteristics
+4. Identify potential preprocessing strategies
+5. Use insights to inform your training approach
+
+### Model Training Workflow
+
+1. Convert and open the model training notebook
+2. Configure model architecture and training parameters
+3. Implement appropriate loss functions based on data analysis
+4. Train and monitor model performance
+5. Save the best performing model
+
+### Results Analysis Workflow
+
+1. Convert and open the results analysis notebook
+2. Load your trained model and evaluation results
+3. Analyze performance using various metrics and visualizations
+4. Identify strengths, weaknesses, and challenging cases
+5. Generate recommendations for further improvement
+
+## 🔄 Data Requirements
 
 The pipeline expects the following directory structure:
 
@@ -132,505 +430,6 @@ data_dir/
     └── Masks_Square/         # Contains square mask images (.png)
 ```
 
-Images need to be preprocessed to a square format before using this pipeline. The pipeline focuses exclusively on square images for consistency and simplicity.
+## 🙌 Enjoy Using the Pipeline!
 
-## Usage
-
-### Quick Start
-
-To run the complete pipeline with default settings:
-
-```bash
-python -m glaucoma.main
-```
-
-### Running Specific Pipeline Steps
-
-You can run specific steps of the pipeline:
-
-```bash
-python -m glaucoma.main --steps load,preprocess,train
-```
-
-Available steps:
-- `load`: Load data into a consolidated format
-- `preprocess`: Create data loaders and splits
-- `train`: Train the segmentation model
-- `evaluate`: Evaluate model performance on test data
-- `ensemble`: Evaluate ensemble of models (if configured)
-
-### Example: Training and Evaluation
-
-```bash
-# Training a model with specific settings
-python -m glaucoma.main --steps train,evaluate --model.architecture unet --model.encoder resnet34 --training.batch_size 16 --training.epochs 50 --output-dir runs/unet_resnet34
-
-# Evaluating a pre-trained model
-python -m glaucoma.main --steps evaluate --model.checkpoint_path runs/unet_resnet34/checkpoints/best_model.pt --output-dir runs/evaluation
-```
-
-## Configuration System
-
-The pipeline uses a hierarchical configuration system that allows for easy customization through:
-1. Default values
-2. Configuration files
-3. Command-line arguments
-
-### Configuration Structure
-
-The configuration is organized into several sections:
-
-- **Data Configuration**: Dataset paths, splits, etc.
-- **Model Configuration**: Architecture, encoder, etc.
-- **Preprocessing Configuration**: Image size, augmentation, etc.
-- **Training Configuration**: Batch size, learning rate, etc.
-- **Evaluation Configuration**: Metrics, thresholds, etc.
-- **Logging Configuration**: Logging settings, W&B integration, etc.
-- **Pipeline Configuration**: Steps to run, etc.
-
-### Using Configuration Files
-
-You can save and load configurations:
-
-```bash
-# Save a config
-python -c "from glaucoma.config import Config; Config().save_json('my_config.json')"
-
-# Load a config
-python -m glaucoma.main --config-file my_config.json
-```
-
-### Command-line Arguments
-
-You can override configuration values via command-line:
-
-```bash
-python -m glaucoma.main --training.batch_size 32 --training.learning_rate 0.001
-```
-
-### Creating Custom Configurations
-
-Here's an example of a custom configuration:
-
-```python
-from glaucoma.config import Config, ModelConfig, TrainingConfig
-
-# Create a custom configuration
-config = Config()
-
-# Customize model configuration
-config.model = ModelConfig(
-    architecture="unet",
-    encoder="resnet34",
-    pretrained=True
-)
-
-# Customize training configuration
-config.training = TrainingConfig(
-    batch_size=16,
-    epochs=50,
-    learning_rate=0.001,
-    optimizer="adam",
-    loss_function="combined"
-)
-
-# Save configuration
-config.save_json("custom_config.json")
-```
-
-## Pipeline Modules
-
-### 1. Data Loading (`data/loader.py`)
-
-The data loading module handles:
-- Loading images from multiple datasets
-- Consolidating data from multiple sources
-- Creating train/validation/test splits
-- Saving the combined dataset to CSV
-
-Example:
-```python
-from glaucoma.data.loader import DatasetLoader
-
-# Create data loader
-loader = DatasetLoader({
-    'REFUGE': {'images': 'data/REFUGE/Images_Square', 'masks': 'data/REFUGE/Masks_Square'},
-    'ORIGA': {'images': 'data/ORIGA/Images_Square', 'masks': 'data/ORIGA/Masks_Square'}
-})
-
-# Load datasets
-df = loader.load_all_datasets()
-
-# Save dataset
-from glaucoma.data.loader import save_dataset
-save_dataset(df, 'data/dataset.csv', create_splits=True)
-```
-
-### 2. Dataset Handling (`data/dataset.py`)
-
-The dataset module provides:
-- Memory-efficient data loading with LRU caching
-- Prefetching for improved performance
-- Integration with PyTorch's Dataset/DataLoader interface
-
-Example:
-```python
-import pandas as pd
-from glaucoma.data.dataset import create_dataloaders
-from glaucoma.data.augmentation import get_training_augmentations, get_validation_augmentations
-
-# Load dataset
-df = pd.read_csv('data/dataset.csv')
-
-# Create dataloaders
-dataloaders = create_dataloaders(
-    df=df,
-    transform_train=get_training_augmentations(image_size=(224, 224)),
-    transform_val=get_validation_augmentations(image_size=(224, 224)),
-    batch_size=16
-)
-
-# Access dataloaders
-train_loader = dataloaders['train']
-val_loader = dataloaders['val']
-test_loader = dataloaders['test']
-```
-
-### 3. Model Creation (`models/factory.py`)
-
-The model factory provides:
-- Easy creation of various segmentation architectures
-- Support for pretrained encoders
-- Simple checkpoint loading
-
-Example:
-```python
-from glaucoma.models.factory import create_model, load_checkpoint
-
-# Create model
-model_config = {
-    'architecture': 'unet',
-    'encoder': 'resnet34',
-    'pretrained': True,
-    'num_classes': 1
-}
-model = create_model(model_config)
-
-# Load checkpoint
-model = load_checkpoint(model, 'checkpoints/best_model.pt')
-```
-
-### 4. Training (`training/trainer.py`)
-
-The training module provides:
-- Comprehensive training loop
-- Learning rate scheduling
-- Early stopping
-- Model checkpointing
-- W&B integration
-
-Example:
-```python
-from glaucoma.training.trainer import Trainer
-from glaucoma.utils.logging import get_logger
-
-# Create trainer
-trainer = Trainer(
-    model=model,
-    train_loader=dataloaders['train'],
-    val_loader=dataloaders['val'],
-    config=config.training,
-    logger=get_logger(),
-    checkpoint_dir='checkpoints'
-)
-
-# Train model
-results = trainer.train()
-```
-
-### 5. Evaluation (`evaluation/evaluator.py`)
-
-The evaluation module provides:
-- Comprehensive model evaluation
-- Calculation of various metrics
-- Visualization of results
-- Support for ensemble evaluation
-
-Example:
-```python
-from glaucoma.evaluation.evaluator import Evaluator
-
-# Create evaluator
-evaluator = Evaluator(
-    model=model,
-    dataloader=dataloaders['test'],
-    config=config.evaluation,
-    logger=get_logger(),
-    output_dir='evaluation_results'
-)
-
-# Evaluate model
-results = evaluator.evaluate()
-```
-
-## Run Tracking System
-
-The pipeline includes an integrated run tracking system:
-
-1. **Run ID**: Each run is assigned a unique ID based on timestamp
-2. **Output Directory**: Each run has its own output directory
-3. **Configuration**: The configuration is saved for reproducibility
-4. **Checkpoints**: Models are saved at regular intervals and upon improvement
-5. **Logs**: Detailed logs are saved to track progress
-6. **Metrics**: Performance metrics are logged
-7. **Visualizations**: Results are visualized for analysis
-
-### Weights & Biases Integration
-
-For more advanced experiment tracking, the pipeline integrates with Weights & Biases:
-
-```bash
-# Enable W&B logging
-python -m glaucoma.main --logging.use_wandb True --logging.wandb_project "glaucoma-detection"
-```
-
-Features:
-- Hyperparameter tracking
-- Metric logging
-- Model checkpointing
-- Sample predictions visualization
-- Confusion matrices
-- PR and ROC curves
-
-## Memory Optimization
-
-The pipeline includes several features for memory optimization:
-
-1. **LRU Caching**: Only keeps frequently used images in memory
-2. **Lazy Loading**: Loads images on-demand rather than all at once
-3. **Prefetching**: Background loading of images for improved performance
-4. **Efficient Image Processing**: Uses OpenCV for fast image loading and processing
-
-These optimizations allow the pipeline to handle large datasets even with limited memory.
-
-## Adding New Components
-
-### Adding a New Model
-
-To add a new model architecture:
-
-1. Add the model implementation to the factory function in `models/factory.py`:
-
-```python
-def create_model(config: Any) -> nn.Module:
-    # Existing code...
-    
-    # Add your new architecture
-    elif architecture == 'your_new_architecture':
-        model = YourNewModel(
-            encoder_name=encoder_name,
-            encoder_weights=encoder_weights,
-            in_channels=in_channels,
-            classes=num_classes,
-            activation=activation
-        )
-    
-    # Rest of the function...
-```
-
-2. Create the model implementation if it's not using a library like segmentation_models_pytorch.
-
-### Adding a New Loss Function
-
-To add a new loss function:
-
-1. Add the loss implementation to `models/losses.py`:
-
-```python
-class YourNewLoss(nn.Module):
-    """Your new loss function implementation."""
-    
-    def __init__(self, param1=0.5, param2=0.5):
-        super().__init__()
-        self.param1 = param1
-        self.param2 = param2
-    
-    def forward(self, y_pred: torch.Tensor, y_true: torch.Tensor) -> torch.Tensor:
-        # Your loss implementation
-        return loss_value
-```
-
-2. Update the `get_loss_function` function to include your new loss:
-
-```python
-def get_loss_function(loss_type: str, **kwargs) -> nn.Module:
-    # Existing code...
-    
-    elif loss_type == 'your_new_loss':
-        return YourNewLoss(**kwargs)
-    
-    # Rest of the function...
-```
-
-### Adding a New Metric
-
-To add a new evaluation metric:
-
-1. Add the metric implementation to `evaluation/metrics.py`:
-
-```python
-def calculate_your_new_metric(
-    pred: torch.Tensor, 
-    target: torch.Tensor
-) -> float:
-    """Calculate your new metric.
-    
-    Args:
-        pred: Prediction tensor
-        target: Target tensor
-        
-    Returns:
-        Your new metric value
-    """
-    # Your metric implementation
-    return metric_value
-```
-
-2. Update the `calculate_metrics` function to include your new metric.
-
-## Ensemble Models
-
-The pipeline supports model ensembling through:
-
-### 1. Basic Ensemble Methods
-
-The `models/ensemble.py` module provides several ensemble methods:
-- **Average Ensemble**: Average predictions from multiple models
-- **Maximum Ensemble**: Take the maximum prediction
-- **Weighted Ensemble**: Weighted average of predictions
-
-### 2. Cross-Validation Ensemble
-
-You can create an ensemble from cross-validation models:
-
-```python
-from glaucoma.models.ensemble import EnsembleFactory
-
-# Create a cross-validation ensemble
-ensemble = EnsembleFactory.create_cross_validation_ensemble(
-    base_model_config={
-        'architecture': 'unet',
-        'encoder': 'resnet34',
-        'pretrained': True
-    },
-    checkpoint_paths=[
-        'checkpoints/fold1/best_model.pt',
-        'checkpoints/fold2/best_model.pt',
-        'checkpoints/fold3/best_model.pt',
-        'checkpoints/fold4/best_model.pt',
-        'checkpoints/fold5/best_model.pt'
-    ],
-    ensemble_method='weighted'
-)
-```
-
-### 3. Multi-Architecture Ensemble
-
-You can create an ensemble with different architectures:
-
-```python
-from glaucoma.models.ensemble import EnsembleFactory
-
-# Create a multi-architecture ensemble
-ensemble = EnsembleFactory.create_multi_architecture_ensemble(
-    model_configs=[
-        {'architecture': 'unet', 'encoder': 'resnet34'},
-        {'architecture': 'fpn', 'encoder': 'resnet50'},
-        {'architecture': 'deeplabv3', 'encoder': 'efficientnet-b4'}
-    ],
-    checkpoint_paths=[
-        'checkpoints/unet/best_model.pt',
-        'checkpoints/fpn/best_model.pt',
-        'checkpoints/deeplab/best_model.pt'
-    ],
-    ensemble_method='average'
-)
-```
-
-### Running Ensemble Evaluation
-
-To evaluate an ensemble:
-
-```bash
-python -m glaucoma.main --steps ensemble --ensemble.models.0.model.architecture unet --ensemble.models.0.checkpoint_path checkpoints/unet/best_model.pt --ensemble.models.1.model.architecture fpn --ensemble.models.1.checkpoint_path checkpoints/fpn/best_model.pt --ensemble.ensemble_method average
-```
-
-Or using a configuration file:
-
-```json
-{
-  "ensemble": {
-    "models": [
-      {
-        "model": {
-          "architecture": "unet",
-          "encoder": "resnet34"
-        },
-        "checkpoint_path": "checkpoints/unet/best_model.pt"
-      },
-      {
-        "model": {
-          "architecture": "fpn",
-          "encoder": "resnet50"
-        },
-        "checkpoint_path": "checkpoints/fpn/best_model.pt"
-      }
-    ],
-    "ensemble_method": "average"
-  }
-}
-```
-
-## Troubleshooting
-
-### Common Issues and Solutions
-
-1. **Memory Errors**:
-   - Reduce batch size (`--training.batch_size`)
-   - Reduce image size (`--preprocessing.image_size`)
-   - Reduce cache size (`--data.cache_size`)
-   - Disable prefetching (`--data.prefetch_size 0`)
-
-2. **CUDA Out of Memory**:
-   - Reduce batch size
-   - Use a smaller encoder backbone
-   - Try mixed precision training (`--training.mixed_precision True`)
-
-3. **Slow Training**:
-   - Increase number of workers (`--training.num_workers`)
-   - Enable prefetching (`--data.prefetch_size 50`)
-   - Use a GPU if available
-
-4. **Poor Performance**:
-   - Try different architectures
-   - Adjust learning rate
-   - Increase training epochs
-   - Use data augmentation
-   - Try ensemble methods
-
-5. **File Not Found Errors**:
-   - Check dataset paths in configuration
-   - Ensure data follows the expected directory structure
-   - Check for typos in file paths
-
-### Getting Help
-
-If you encounter issues not covered here:
-1. Check the logs for detailed error messages
-2. Look for similar issues in the repository's Issues section
-3. Create a new issue with detailed description and steps to reproduce
-
-## Acknowledgments
-
-- The ORIGA, REFUGE, and G1020 datasets for making their data available for research
-- The PyTorch, Albumentations, and other open-source libraries used in this project
+For further assistance or to report issues, please create an issue in the repository. Happy glaucoma detection! 🎉
