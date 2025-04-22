@@ -1,0 +1,19 @@
+{
+  "runs": {
+    "69991e1af35bb7b018753828243e4ae2": {
+      "completed_at": 1745322172.3384275,
+      "run_id": "",
+      "config_summary": "unet_resnet34_combined",
+      "metadata": {
+        "dice": 0.9278366959948556,
+        "iou": 0.8744225024208945,
+        "accuracy": 0.997865240571287,
+        "precision": 0.940336969468934,
+        "recall": 0.929933343064063
+      }
+    }
+  },
+  "metadata": {
+    "last_updated": 1745322172.3384275
+  }
+}

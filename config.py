@@ -1,16 +1,18 @@
 """
 Configuration Module
 
-Centralized configuration for the glaucoma detection pipeline.
-Streamlined for clarity and ease of use.
+This module defines the configuration for the glaucoma detection pipeline.
 """
 
-import argparse
 import json
-from pathlib import Path
+import yaml
 import os
+import argparse
+from pathlib import Path
 from dataclasses import dataclass, field, asdict
-from typing import Dict, List, Optional, Any, Union
+from typing import Dict, List, Optional, Any, Union, Tuple
+from datetime import datetime
+import uuid
 
 @dataclass
 class DataConfig:
@@ -42,8 +44,8 @@ class DataConfig:
     test_split: float = 0.15
     
     # Performance options
-    cache_size: int = 100
-    prefetch_size: int = 4
+    cache_size: int = 0  # Disabled by default to avoid multiprocessing issues
+    prefetch_size: int = 0  # Disabled by default to avoid multiprocessing issues
 
 @dataclass
 class ModelConfig:
@@ -75,6 +77,21 @@ class PreprocessingConfig:
     brightness_contrast_range: float = 0.2
 
 @dataclass
+class LossConfig:
+    """Loss configuration."""
+    # Loss function type
+    loss_function: str = "combined"
+    
+    # Loss weights
+    dice_weight: float = 1.0
+    bce_weight: float = 0.0  
+    focal_weight: float = 1.0  
+    
+    # Focal loss parameters
+    focal_gamma: float = 2.0
+    focal_alpha: float = 0.25
+
+@dataclass
 class TrainingConfig:
     """Training configuration."""
     # Basic training parameters
@@ -87,19 +104,14 @@ class TrainingConfig:
     optimizer: str = "adam"
     weight_decay: float = 0.0001
     
-    # Loss function
-    loss_function: str = "combined"
-    dice_weight: float = 1.0
-    bce_weight: float = 0.5
-    focal_weight: float = 0.5
-    focal_gamma: float = 2.0
-    focal_alpha: float = 0.25
+    # Loss settings are now in LossConfig
+    loss: LossConfig = field(default_factory=LossConfig)
     
     # Advanced training options
     grad_accum_steps: int = 1  # Gradient accumulation steps
     
     # Hardware
-    use_gpu: bool = True
+    device: str = "cuda"
     use_amp: bool = False  # Automatic mixed precision
     
     # Training monitoring
@@ -131,6 +143,10 @@ class EvaluationConfig:
     # Metrics to calculate
     metrics: List[str] = field(default_factory=lambda: ['dice', 'iou', 'accuracy', 'precision', 'recall', 'f1'])
     
+    # CDR calculation
+    calculate_cdr: bool = False
+    cdr_method: str = "diameter"
+    
     # Test-time augmentation
     use_tta: bool = False
     tta_scales: List[float] = field(default_factory=lambda: [0.75, 1.0, 1.25])
@@ -142,25 +158,43 @@ class EvaluationConfig:
     sample_count: int = 10
 
 @dataclass
-class LoggingConfig:
-    """Logging configuration."""
-    # Logging directories
-    log_dir: str = "logs"
+class WandbConfig:
+    """Weights & Biases configuration."""
+    # Basic settings - always enabled
+    enabled: bool = True
+    project: str = "glaucoma-detection"
+    entity: Optional[str] = None
     
-    # Weights & Biases
-    use_wandb: bool = False
-    wandb_project: str = "glaucoma-detection"
-    run_name: Optional[str] = None
+    # Run information
+    name: Optional[str] = None
+    group: Optional[str] = None
     tags: List[str] = field(default_factory=list)
+    notes: Optional[str] = None
+    
+    # Additional settings
+    log_model: bool = True
+    log_code: bool = True
+    log_dataset: bool = False
+    save_output: bool = True
 
 @dataclass
 class PipelineConfig:
     """Pipeline configuration."""
+    # Unique run identifier
+    run_id: str = field(default_factory=lambda: datetime.now().strftime("%Y%m%d_%H%M%S"))
+    
     # Pipeline steps to execute
     steps: List[str] = field(default_factory=lambda: ['load', 'preprocess', 'train', 'evaluate'])
     
     # Description
     description: str = "Glaucoma Detection Pipeline"
+    
+    # Output paths
+    output_dir: str = "output"
+    checkpoint_dir: Optional[str] = None
+    
+    # Wandb configuration
+    wandb: WandbConfig = field(default_factory=WandbConfig)
 
 @dataclass
 class Config:
@@ -171,11 +205,17 @@ class Config:
     preprocessing: PreprocessingConfig = field(default_factory=PreprocessingConfig)
     training: TrainingConfig = field(default_factory=TrainingConfig)
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
-    logging: LoggingConfig = field(default_factory=LoggingConfig)
     pipeline: PipelineConfig = field(default_factory=PipelineConfig)
     
-    # Output directory
-    output_dir: str = "output"
+    def __post_init__(self):
+        """Initialize derived properties."""
+        # Set checkpoint directory if not specified
+        if not self.pipeline.checkpoint_dir:
+            self.pipeline.checkpoint_dir = os.path.join(
+                self.pipeline.output_dir, 
+                f"run_{self.pipeline.run_id}", 
+                "checkpoints"
+            )
     
     def to_dict(self) -> Dict[str, Any]:
         """Convert configuration to dictionary."""
@@ -184,13 +224,24 @@ class Config:
     @classmethod
     def from_dict(cls, config_dict: Dict[str, Any]) -> 'Config':
         """Create configuration from dictionary."""
+        # Extract nested configs
         data_config = DataConfig(**config_dict.get('data', {}))
         model_config = ModelConfig(**config_dict.get('model', {}))
         preprocessing_config = PreprocessingConfig(**config_dict.get('preprocessing', {}))
-        training_config = TrainingConfig(**config_dict.get('training', {}))
+        
+        # Handle nested loss config in training
+        training_dict = config_dict.get('training', {})
+        loss_dict = training_dict.pop('loss', {})
+        loss_config = LossConfig(**loss_dict)
+        training_config = TrainingConfig(**training_dict, loss=loss_config)
+        
         evaluation_config = EvaluationConfig(**config_dict.get('evaluation', {}))
-        logging_config = LoggingConfig(**config_dict.get('logging', {}))
-        pipeline_config = PipelineConfig(**config_dict.get('pipeline', {}))
+        
+        # Handle nested wandb config in pipeline
+        pipeline_dict = config_dict.get('pipeline', {})
+        wandb_dict = pipeline_dict.pop('wandb', {})
+        wandb_config = WandbConfig(**wandb_dict)
+        pipeline_config = PipelineConfig(**pipeline_dict, wandb=wandb_config)
         
         return cls(
             data=data_config,
@@ -198,9 +249,7 @@ class Config:
             preprocessing=preprocessing_config,
             training=training_config,
             evaluation=evaluation_config,
-            logging=logging_config,
-            pipeline=pipeline_config,
-            output_dir=config_dict.get('output_dir', 'output')
+            pipeline=pipeline_config
         )
     
     @classmethod
@@ -211,63 +260,84 @@ class Config:
         
         return cls.from_dict(config_dict)
     
+    @classmethod
+    def from_yaml(cls, yaml_path: Union[str, Path]) -> 'Config':
+        """Load configuration from YAML file."""
+        with open(yaml_path, 'r') as f:
+            config_dict = yaml.safe_load(f)
+        
+        return cls.from_dict(config_dict)
+    
     def save_json(self, json_path: Union[str, Path]) -> None:
         """Save configuration to JSON file."""
         with open(json_path, 'w') as f:
             json.dump(self.to_dict(), f, indent=4)
+    
+    def save_yaml(self, yaml_path: Union[str, Path]) -> None:
+        """Save configuration to YAML file."""
+        with open(yaml_path, 'w') as f:
+            yaml.dump(self.to_dict(), f, indent=4)
+    
+    def generate_run_name(self) -> str:
+        """Generate a descriptive run name for WandB."""
+        # Format: {model}_{encoder}_{dataset}_{timestamp}_{unique_id}
+        timestamp = datetime.now().strftime("%Y%m%d")
+        short_id = str(uuid.uuid4())[:8]
+        
+        datasets = "_".join(list(self.data.data_dirs.keys())[:2])  # First two datasets
+        
+        return f"{self.model.architecture}_{self.model.encoder}_{datasets}_{timestamp}_{short_id}"
 
 def get_argument_parser() -> argparse.ArgumentParser:
     """Create argument parser for command-line arguments."""
     parser = argparse.ArgumentParser(description="Glaucoma Detection Pipeline")
     
+    # Config file
+    parser.add_argument('--config', type=str, help='Path to config file (JSON or YAML)')
+    
     # Pipeline configuration
-    parser.add_argument('--output-dir', type=str, default='output', help='Output directory')
-    parser.add_argument('--steps', type=str, default='train,evaluate', 
+    parser.add_argument('--output-dir', type=str, help='Output directory')
+    parser.add_argument('--steps', type=str,
                       help='Pipeline steps to run (comma-separated, options: load,preprocess,train,evaluate,ensemble)')
     
     # Data configuration
+    parser.add_argument('--data-dirs', type=str, help='Path to JSON file with data directories')
     parser.add_argument('--dataset-file', type=str, help='Path to dataset CSV file')
-    parser.add_argument('--random-state', type=int, default=42, help='Random seed')
     
     # Model configuration
-    parser.add_argument('--architecture', type=str, default='unet', 
+    parser.add_argument('--architecture', type=str,
                       choices=['unet', 'unetplusplus', 'deeplabv3', 'deeplabv3plus', 'fpn', 'pspnet'], 
                       help='Model architecture')
-    parser.add_argument('--encoder', type=str, default='resnet34', help='Encoder backbone')
+    parser.add_argument('--encoder', type=str, help='Encoder backbone')
     parser.add_argument('--checkpoint-path', type=str, help='Path to model checkpoint for evaluation')
     
     # Preprocessing configuration
-    parser.add_argument('--image-size', type=int, default=224, help='Image size')
+    parser.add_argument('--image-size', type=int, help='Image size')
     parser.add_argument('--no-augmentation', action='store_false', dest='augmentation_enabled',
                       help='Disable data augmentation')
     
     # Training configuration
-    parser.add_argument('--epochs', type=int, default=30, help='Number of training epochs')
-    parser.add_argument('--batch-size', type=int, default=16, help='Batch size')
-    parser.add_argument('--learning-rate', type=float, default=0.001, help='Learning rate')
-    parser.add_argument('--loss-function', type=str, default='combined', 
+    parser.add_argument('--epochs', type=int, help='Number of training epochs')
+    parser.add_argument('--batch-size', type=int, help='Batch size')
+    parser.add_argument('--learning-rate', type=float, help='Learning rate')
+    parser.add_argument('--optimizer', type=str, choices=['adam', 'sgd'], help='Optimizer')
+    parser.add_argument('--loss-function', type=str, 
                       choices=['dice', 'bce', 'focal', 'tversky', 'combined'],
                       help='Loss function')
-    parser.add_argument('--focal-weight', type=float, default=0.5, 
-                      help='Weight for focal loss in combined loss')
-    parser.add_argument('--use-amp', action='store_true', help='Use automatic mixed precision training')
-    parser.add_argument('--grad-accum-steps', type=int, default=1, 
-                      help='Number of steps for gradient accumulation')
-    parser.add_argument('--grad-clip', type=float, default=1.0,
-                      help='Value for gradient clipping (0 to disable)')
+    parser.add_argument('--device', type=str, help='Device to use (cuda or cpu)')
     
     # Evaluation configuration
-    parser.add_argument('--threshold', type=float, default=0.5, help='Threshold for binary segmentation')
+    parser.add_argument('--threshold', type=float, help='Threshold for binary segmentation')
     parser.add_argument('--use-tta', action='store_true', help='Use test-time augmentation')
+    parser.add_argument('--calculate-cdr', action='store_true', help='Calculate Cup-to-Disc Ratio')
     
-    # Logging configuration
-    parser.add_argument('--use-wandb', action='store_true', help='Enable Weights & Biases logging')
-    parser.add_argument('--wandb-project', type=str, default='glaucoma-detection', 
-                      help='Weights & Biases project name')
-    parser.add_argument('--run-name', type=str, help='Run name for logging')
-    
-    # Config file
-    parser.add_argument('--config-file', type=str, help='Path to JSON configuration file')
+    # WandB configuration
+    parser.add_argument('--wandb-project', type=str, help='WandB project name')
+    parser.add_argument('--wandb-entity', type=str, help='WandB entity (username or team)')
+    parser.add_argument('--wandb-name', type=str, help='WandB run name')
+    parser.add_argument('--wandb-group', type=str, help='WandB group')
+    parser.add_argument('--wandb-tags', type=str, help='WandB tags (comma-separated)')
+    parser.add_argument('--wandb-notes', type=str, help='WandB notes')
     
     return parser
 
@@ -286,25 +356,35 @@ def parse_args_and_create_config(args=None) -> Config:
         parser = get_argument_parser()
         args = parser.parse_args()
     
+    # Start with default config
+    config = Config()
+    
     # If config file is provided, load it
-    if hasattr(args, 'config_file') and args.config_file:
-        config = Config.from_json(args.config_file)
-    else:
-        config = Config()
+    if hasattr(args, 'config') and args.config:
+        if args.config.endswith('.json'):
+            config = Config.from_json(args.config)
+        elif args.config.endswith(('.yml', '.yaml')):
+            config = Config.from_yaml(args.config)
+        else:
+            raise ValueError(f"Unknown config file format: {args.config}")
     
     # Update config with command-line arguments
+    # Pipeline configuration
     if hasattr(args, 'output_dir') and args.output_dir:
-        config.output_dir = args.output_dir
+        config.pipeline.output_dir = args.output_dir
     
     if hasattr(args, 'steps') and args.steps:
         config.pipeline.steps = args.steps.split(',')
     
+    # Data configuration
+    if hasattr(args, 'data_dirs') and args.data_dirs:
+        with open(args.data_dirs, 'r') as f:
+            config.data.data_dirs = json.load(f)
+    
     if hasattr(args, 'dataset_file') and args.dataset_file:
         config.data.dataset_file = args.dataset_file
     
-    if hasattr(args, 'random_state') and args.random_state:
-        config.data.random_state = args.random_state
-    
+    # Model configuration
     if hasattr(args, 'architecture') and args.architecture:
         config.model.architecture = args.architecture
     
@@ -314,12 +394,14 @@ def parse_args_and_create_config(args=None) -> Config:
     if hasattr(args, 'checkpoint_path') and args.checkpoint_path:
         config.model.checkpoint_path = args.checkpoint_path
     
+    # Preprocessing configuration
     if hasattr(args, 'image_size') and args.image_size:
         config.preprocessing.image_size = args.image_size
     
     if hasattr(args, 'augmentation_enabled'):
         config.preprocessing.augmentation_enabled = args.augmentation_enabled
     
+    # Training configuration
     if hasattr(args, 'epochs') and args.epochs:
         config.training.epochs = args.epochs
     
@@ -330,34 +412,49 @@ def parse_args_and_create_config(args=None) -> Config:
     if hasattr(args, 'learning_rate') and args.learning_rate:
         config.training.learning_rate = args.learning_rate
     
+    if hasattr(args, 'optimizer') and args.optimizer:
+        config.training.optimizer = args.optimizer
+    
     if hasattr(args, 'loss_function') and args.loss_function:
-        config.training.loss_function = args.loss_function
+        config.training.loss.loss_function = args.loss_function
     
-    if hasattr(args, 'focal_weight') and args.focal_weight is not None:
-        config.training.focal_weight = args.focal_weight
+    if hasattr(args, 'device') and args.device:
+        config.training.device = args.device
     
-    if hasattr(args, 'use_amp') and args.use_amp:
-        config.training.use_amp = args.use_amp
-        
-    if hasattr(args, 'grad_accum_steps') and args.grad_accum_steps:
-        config.training.grad_accum_steps = args.grad_accum_steps
-        
-    if hasattr(args, 'grad_clip') and args.grad_clip is not None:
-        config.training.grad_clip = args.grad_clip
-    
+    # Evaluation configuration
     if hasattr(args, 'threshold') and args.threshold is not None:
         config.evaluation.threshold = args.threshold
-        
+    
     if hasattr(args, 'use_tta') and args.use_tta:
         config.evaluation.use_tta = args.use_tta
     
-    if hasattr(args, 'use_wandb') and args.use_wandb:
-        config.logging.use_wandb = args.use_wandb
+    if hasattr(args, 'calculate_cdr') and args.calculate_cdr:
+        config.evaluation.calculate_cdr = args.calculate_cdr
     
+    # WandB configuration - always enabled
     if hasattr(args, 'wandb_project') and args.wandb_project:
-        config.logging.wandb_project = args.wandb_project
+        config.pipeline.wandb.project = args.wandb_project
     
-    if hasattr(args, 'run_name') and args.run_name:
-        config.logging.run_name = args.run_name
+    if hasattr(args, 'wandb_entity') and args.wandb_entity:
+        config.pipeline.wandb.entity = args.wandb_entity
+    
+    if hasattr(args, 'wandb_name') and args.wandb_name:
+        config.pipeline.wandb.name = args.wandb_name
+    
+    if hasattr(args, 'wandb_group') and args.wandb_group:
+        config.pipeline.wandb.group = args.wandb_group
+    
+    if hasattr(args, 'wandb_tags') and args.wandb_tags:
+        config.pipeline.wandb.tags = args.wandb_tags.split(',')
+    
+    if hasattr(args, 'wandb_notes') and args.wandb_notes:
+        config.pipeline.wandb.notes = args.wandb_notes
+    
+    # If no wandb name specified, generate one
+    if not config.pipeline.wandb.name:
+        config.pipeline.wandb.name = config.generate_run_name()
+    
+    # Update checkpoint directory
+    config.__post_init__()
     
     return config
