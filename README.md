@@ -20,6 +20,8 @@ The pipeline works with three glaucoma datasets:
 2. **REFUGE** - Retinal Fundus Glaucoma Challenge dataset with expert annotations
 3. **G1020** - A large collection of retinal images with associated metadata
 
+Dataset link: https://drive.google.com/file/d/1-h3Bv1Fjf38s42w5Cp_a-9CgXNfDGwWt/view?usp=drive_link
+
 ## 📋 Table of Contents
 
 - [Installation](#-installation)
