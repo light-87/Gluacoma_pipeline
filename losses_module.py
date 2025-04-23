@@ -210,24 +210,12 @@ def create_loss_function(config):
     """
     loss_type = config.loss_function.lower()
     
-    if loss_type == 'dice':
-        return DiceLoss()
-    elif loss_type == 'bce':
-        return nn.BCEWithLogitsLoss()
-    elif loss_type == 'focal':
-        return FocalLoss(
-            alpha=config.focal_alpha,
-            gamma=config.focal_gamma
-        )
-    elif loss_type == 'tversky':
-        return TverskyLoss()
-    elif loss_type == 'combined':
-        return CombinedLoss(
-            dice_weight=config.dice_weight,
-            bce_weight=config.bce_weight,
-            focal_weight=config.focal_weight,
-            focal_gamma=config.focal_gamma,
-            focal_alpha=config.focal_alpha
-        )
-    else:
-        raise ValueError(f"Unknown loss function: {loss_type}")
+    # Use the weights directly from the config - they should be properly set now
+    return CombinedLoss(
+        dice_weight=config.dice_weight,
+        bce_weight=config.bce_weight,
+        focal_weight=config.focal_weight,
+        tversky_weight=0.0,  # Use config.tversky_weight if available
+        focal_gamma=config.focal_gamma,
+        focal_alpha=config.focal_alpha
+    )

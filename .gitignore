@@ -8,3 +8,7 @@ glaucoma/training/__pycache__
 glaucoma/models/__pycache__
 glaucoma/evaluation/__pycache__
 glaucoma/data/__pycache__
+__pycache__
+notebooks/.ipynb_checkpoints
+notebooks
+config_examples

@@ -56,6 +56,24 @@ def setup_environment(config):
     else:
         device = torch.device(config.training.device)
     
+    # Ensure loss weights are correctly set based on the loss function type
+    loss_type = config.training.loss.loss_function.lower()
+    if loss_type == 'dice':
+        config.training.loss.dice_weight = 1.0
+        config.training.loss.bce_weight = 0.0
+        config.training.loss.focal_weight = 0.0
+    elif loss_type == 'bce':
+        config.training.loss.dice_weight = 0.0
+        config.training.loss.bce_weight = 1.0
+        config.training.loss.focal_weight = 0.0
+    elif loss_type == 'focal':
+        config.training.loss.dice_weight = 0.0
+        config.training.loss.bce_weight = 0.0
+        config.training.loss.focal_weight = 1.0
+    elif loss_type == 'combined':
+        # For combined loss, keep the weights as they are
+        pass
+    
     # Create output directories
     output_dir = Path(config.pipeline.output_dir) / f"run_{config.pipeline.run_id}"
     output_dir.mkdir(parents=True, exist_ok=True)

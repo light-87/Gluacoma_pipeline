@@ -79,10 +79,10 @@ class PreprocessingConfig:
 @dataclass
 class LossConfig:
     """Loss configuration."""
-    # Loss function type
+    # Loss function type 
     loss_function: str = "combined"
     
-    # Loss weights
+    # Loss weights - override these based on loss_function
     dice_weight: float = 1.0
     bce_weight: float = 0.0  
     focal_weight: float = 1.0  
@@ -90,6 +90,26 @@ class LossConfig:
     # Focal loss parameters
     focal_gamma: float = 2.0
     focal_alpha: float = 0.25
+    
+    def __post_init__(self):
+        """Initialize weights based on loss_function."""
+        # Reset weights based on loss function type
+        loss_type = self.loss_function.lower()
+        if loss_type == 'dice':
+            self.dice_weight = 1.0
+            self.bce_weight = 0.0
+            self.focal_weight = 0.0
+        elif loss_type == 'bce':
+            self.dice_weight = 0.0
+            self.bce_weight = 1.0
+            self.focal_weight = 0.0
+        elif loss_type == 'focal':
+            self.dice_weight = 0.0
+            self.bce_weight = 0.0
+            self.focal_weight = 1.0
+        elif loss_type == 'combined':
+            # For combined, use the default values
+            pass
 
 @dataclass
 class TrainingConfig:
@@ -416,7 +436,14 @@ def parse_args_and_create_config(args=None) -> Config:
         config.training.optimizer = args.optimizer
     
     if hasattr(args, 'loss_function') and args.loss_function:
-        config.training.loss.loss_function = args.loss_function
+        # Create a new LossConfig with the specified loss function
+        # This will automatically set the weights correctly through __post_init__
+        config.training.loss = LossConfig(
+            loss_function=args.loss_function.lower(),
+            # Keep the focal parameters from the existing config
+            focal_gamma=config.training.loss.focal_gamma,
+            focal_alpha=config.training.loss.focal_alpha
+        )
     
     if hasattr(args, 'device') and args.device:
         config.training.device = args.device

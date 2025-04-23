@@ -19,10 +19,11 @@ echo Running loss function comparison (will automatically skip already completed
 echo.
 
 REM Different loss functions
-python run.py --architecture %ARCHITECTURE% --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_%ENCODER%_dice" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function dice
-echo.
 
 python run.py --architecture %ARCHITECTURE% --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_%ENCODER%_bce" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function bce
+echo.
+
+python run.py --architecture %ARCHITECTURE% --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_%ENCODER%_dice" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function dice
 echo.
 
 python run.py --architecture %ARCHITECTURE% --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_%ENCODER%_focal" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function focal
