@@ -345,6 +345,12 @@ def get_argument_parser() -> argparse.ArgumentParser:
                       choices=['dice', 'bce', 'focal', 'tversky', 'combined'],
                       help='Loss function')
     parser.add_argument('--device', type=str, help='Device to use (cuda or cpu)')
+
+    parser.add_argument('--dice-weight', type=float, help='Weight for dice loss component')
+    parser.add_argument('--bce-weight', type=float, help='Weight for BCE loss component')
+    parser.add_argument('--focal-weight', type=float, help='Weight for focal loss component')
+    parser.add_argument('--focal-gamma', type=float, help='Gamma parameter for focal loss')
+    parser.add_argument('--focal-alpha', type=float, help='Alpha parameter for focal loss')
     
     # Evaluation configuration
     parser.add_argument('--threshold', type=float, help='Threshold for binary segmentation')
@@ -436,14 +442,31 @@ def parse_args_and_create_config(args=None) -> Config:
         config.training.optimizer = args.optimizer
     
     if hasattr(args, 'loss_function') and args.loss_function:
-        # Create a new LossConfig with the specified loss function
-        # This will automatically set the weights correctly through __post_init__
-        config.training.loss = LossConfig(
-            loss_function=args.loss_function.lower(),
-            # Keep the focal parameters from the existing config
-            focal_gamma=config.training.loss.focal_gamma,
-            focal_alpha=config.training.loss.focal_alpha
-        )
+        loss_type = args.loss_function.lower()
+        config.training.loss.loss_function = loss_type
+        
+        # Reset weights based on the selected loss function
+        if loss_type == 'dice':
+            config.training.loss.dice_weight = 1.0
+            config.training.loss.bce_weight = 0.0
+            config.training.loss.focal_weight = 0.0
+        elif loss_type == 'bce':
+            config.training.loss.dice_weight = 0.0
+            config.training.loss.bce_weight = 1.0
+            config.training.loss.focal_weight = 0.0
+        elif loss_type == 'focal':
+            config.training.loss.dice_weight = 0.0
+            config.training.loss.bce_weight = 0.0
+            config.training.loss.focal_weight = 1.0
+        elif loss_type == 'combined':
+            # For combined, you can leave the defaults or update them
+            # based on additional arguments if provided
+            if hasattr(args, 'dice_weight') and args.dice_weight is not None:
+                config.training.loss.dice_weight = args.dice_weight
+            if hasattr(args, 'focal_weight') and args.focal_weight is not None:
+                config.training.loss.focal_weight = args.focal_weight
+            if hasattr(args, 'bce_weight') and args.bce_weight is not None:
+                config.training.loss.bce_weight = args.bce_weight
     
     if hasattr(args, 'device') and args.device:
         config.training.device = args.device
