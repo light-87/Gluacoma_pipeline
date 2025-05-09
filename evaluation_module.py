@@ -175,7 +175,7 @@ def evaluate_model(model: nn.Module,
         use_tta: Whether to use test-time augmentation
         
     Returns:
-        Dictionary with evaluation metrics
+        Dictionary with evaluation metrics and individual CDR values
     """
     model.eval()
     
@@ -184,8 +184,29 @@ def evaluate_model(model: nn.Module,
     all_masks = []
     all_cdrs = []
     
+    # Store image filenames for CDR tracking (if available)
+    filenames = []
+    sample_ids = []
+    individual_cdrs = []
+    cdr_data = []
+    
+    sample_idx = 0
+    
     with torch.no_grad():
-        for batch_idx, (images, masks) in enumerate(tqdm(dataloader, desc='Evaluation')):
+        for batch_idx, batch_data in enumerate(tqdm(dataloader, desc='Evaluation')):
+            # Handle different dataloader formats (with or without filenames)
+            if isinstance(batch_data, tuple) and len(batch_data) == 2:
+                # Standard format: (images, masks)
+                images, masks = batch_data
+                batch_filenames = [f"sample_{sample_idx + i}" for i in range(len(images))]
+            elif isinstance(batch_data, tuple) and len(batch_data) == 3:
+                # Format with filenames: (images, masks, filenames)
+                images, masks, batch_filenames = batch_data
+            else:
+                # Fallback
+                images, masks = batch_data
+                batch_filenames = [f"sample_{sample_idx + i}" for i in range(len(images))]
+            
             # Move data to device
             images = images.to(device)
             masks = masks.to(device)
@@ -211,8 +232,36 @@ def evaluate_model(model: nn.Module,
                         # (for glaucoma, cup is the region of interest)
                         cdr = calculate_cdr(masks[i], preds[i], method=cdr_method)
                         all_cdrs.append(cdr)
+                        
+                        # Store individual CDR value with filename
+                        if isinstance(cdr, dict):
+                            # If cdr_method is 'both', store all values
+                            cdr_entry = {
+                                'sample_id': sample_idx + i,
+                                'filename': batch_filenames[i] if i < len(batch_filenames) else f"sample_{sample_idx + i}",
+                                'area_cdr': cdr['area_cdr'],
+                                'diameter_cdr': cdr['diameter_cdr'],
+                                'average_cdr': cdr['average_cdr']
+                            }
+                        else:
+                            # Single CDR value
+                            cdr_entry = {
+                                'sample_id': sample_idx + i,
+                                'filename': batch_filenames[i] if i < len(batch_filenames) else f"sample_{sample_idx + i}",
+                                f'{cdr_method}_cdr': cdr
+                            }
+                        cdr_data.append(cdr_entry)
+                        
                     except Exception as e:
-                        print(f"Error calculating CDR: {e}")
+                        print(f"Error calculating CDR for sample {sample_idx + i}: {e}")
+                        # Add empty entry for failed calculations
+                        cdr_data.append({
+                            'sample_id': sample_idx + i,
+                            'filename': batch_filenames[i] if i < len(batch_filenames) else f"sample_{sample_idx + i}",
+                            'error': str(e)
+                        })
+            
+            sample_idx += len(images)
     
     # Concatenate all predictions and masks
     all_preds = torch.cat(all_preds, dim=0)
@@ -237,7 +286,32 @@ def evaluate_model(model: nn.Module,
         metrics['cdr_std'] = np.std(all_cdrs)
         metrics['cdr_median'] = np.median(all_cdrs)
     
-    return metrics
+    # Save individual CDR values to CSV if calculated
+    if calculate_cdr_flag and cdr_data:
+        try:
+            import os
+            from pathlib import Path
+            
+            # Create output directory
+            output_dir = Path('./output/cdr_results')
+            output_dir.mkdir(parents=True, exist_ok=True)
+            
+            # Create DataFrame and save to CSV
+            cdr_df = pd.DataFrame(cdr_data)
+            csv_path = output_dir / f'cdr_values_{cdr_method}.csv'
+            cdr_df.to_csv(csv_path, index=False)
+            print(f"Saved individual CDR values to {csv_path}")
+            
+            # Return path to the CSV file
+            metrics['cdr_csv_path'] = str(csv_path)
+        except Exception as e:
+            print(f"Error saving CDR values to CSV: {e}")
+    
+    # Return metrics and individual CDR values
+    return {
+        'metrics': metrics,
+        'cdr_data': cdr_data if calculate_cdr_flag else []
+    }
 
 def test_time_augmentation(model: nn.Module, images: torch.Tensor) -> torch.Tensor:
     """Apply test-time augmentation to improve prediction accuracy.

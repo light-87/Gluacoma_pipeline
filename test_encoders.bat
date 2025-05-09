@@ -19,7 +19,7 @@ echo Running encoder parameter search (will automatically skip already completed
 echo.
 
 REM Lightweight encoders
-python run.py --architecture %ARCHITECTURE% --encoder efficientnet-b0 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_efficientnet-b0" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+python run.py --architecture %ARCHITECTURE% --encoder efficientnet-b3 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_efficientnet-b3" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
 python run.py --architecture %ARCHITECTURE% --encoder mobilenet_v2 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_mobilenet_v2" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
@@ -29,13 +29,13 @@ python run.py --architecture %ARCHITECTURE% --encoder resnet18 --wandb-project %
 echo.
 
 REM Medium encoders
-python run.py --architecture %ARCHITECTURE% --encoder resnet34 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_resnet34" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+python run.py --architecture %ARCHITECTURE% --encoder dpn68 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_dpn68" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture %ARCHITECTURE% --encoder densenet121 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_densenet121" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+python run.py --architecture %ARCHITECTURE% --encoder densenet169 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_densenet169" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture %ARCHITECTURE% --encoder efficientnet-b2 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_efficientnet-b2" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+python run.py --architecture %ARCHITECTURE% --encoder mit_b1 --wandb-project %WANDB_PROJECT% --wandb-name "%ARCHITECTURE%_mit_b1" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
 REM List all completed runs at the end

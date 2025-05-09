@@ -18,23 +18,32 @@ SET LOSS_FUNCTION=combined
 echo Running architecture comparison (will automatically skip already completed runs)
 echo.
 
-REM Different architectures
-python run.py --architecture unet --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "unet_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 1) UNet
+python run.py --architecture unet           --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "unet_%ENCODER%"        --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture unetplusplus --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "unetplusplus_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 2) MAnet 
+python run.py --architecture manet          --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "manet_%ENCODER%"       --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture deeplabv3 --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "deeplabv3_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 3) FPN
+python run.py --architecture fpn            --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "fpn_%ENCODER%"         --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture deeplabv3plus --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "deeplabv3plus_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 4) PAN
+python run.py --architecture pan            --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "pan_%ENCODER%"         --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture fpn --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "fpn_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 5) DeepLabV3+
+python run.py --architecture deeplabv3plus  --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "deeplabv3plus_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
-python run.py --architecture pspnet --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "pspnet_%ENCODER%" --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+REM 6) Segformer 
+python run.py --architecture segformer      --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "segformer_%ENCODER%"   --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
+echo.
+
+REM 7) DPT
+python run.py --architecture dpt            --encoder %ENCODER% --wandb-project %WANDB_PROJECT% --wandb-name "dpt_%ENCODER%"         --wandb-group %WANDB_GROUP% --device %DEVICE% --epochs %EPOCHS% --batch-size %BATCH_SIZE% --loss-function %LOSS_FUNCTION%
 echo.
 
 REM List all completed runs at the end

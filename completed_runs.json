@@ -1,19 +1,67 @@
 {
   "runs": {
-    "69991e1af35bb7b018753828243e4ae2": {
-      "completed_at": 1745322172.3384275,
+    "66ea8ba5ce8f258e77da8d258017a360": {
+      "completed_at": 1745417585.7672246,
+      "run_id": "",
+      "config_summary": "unet_resnet34_bce",
+      "metadata": {
+        "dice": 0.9323372549164032,
+        "iou": 0.8796391726369924,
+        "accuracy": 0.997895297184999,
+        "precision": 0.9150137157416007,
+        "recall": 0.9610354910390002
+      }
+    },
+    "664e6593c528c5c6a0c93bb4f848035f": {
+      "completed_at": 1745419191.253792,
+      "run_id": "",
+      "config_summary": "unet_resnet34_dice",
+      "metadata": {
+        "dice": 0.9373914401049666,
+        "iou": 0.8890783962406857,
+        "accuracy": 0.9981025028558407,
+        "precision": 0.9435773995384706,
+        "recall": 0.940727623190863
+      }
+    },
+    "9d60423537f721598fbe9eaf7181dbdb": {
+      "completed_at": 1745420743.1735244,
+      "run_id": "",
+      "config_summary": "unet_resnet34_focal",
+      "metadata": {
+        "dice": 0.8931946711607122,
+        "iou": 0.8247694834902571,
+        "accuracy": 0.9970284182045781,
+        "precision": 0.969942641346305,
+        "recall": 0.8469533056855657
+      }
+    },
+    "f87ed9686f511b36e3a04f7e507b209d": {
+      "completed_at": 1745422296.5590744,
       "run_id": "",
       "config_summary": "unet_resnet34_combined",
       "metadata": {
-        "dice": 0.9278366959948556,
-        "iou": 0.8744225024208945,
-        "accuracy": 0.997865240571287,
-        "precision": 0.940336969468934,
-        "recall": 0.929933343064063
+        "dice": 0.9427634740424421,
+        "iou": 0.8952488700779297,
+        "accuracy": 0.9981980828874465,
+        "precision": 0.9334770334796707,
+        "recall": 0.9583289185358272
+      }
+    },
+    "0335600bd69b6542e87bdf8cae34e385": {
+      "completed_at": 1745438343.350496,
+      "run_id": "",
+      "config_summary": "unet_resnet34_combined",
+      "metadata": {
+        "dice": 0.9392242109812484,
+        "iou": 0.8904942114191376,
+        "accuracy": 0.9981247447499874,
+        "precision": 0.9405941764694706,
+        "recall": 0.9464889499819327
       }
     }
   },
   "metadata": {
-    "last_updated": 1745322172.3384275
+    "last_updated": 1745438343.350496
   }
 }

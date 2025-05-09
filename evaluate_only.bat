@@ -1,5 +1,5 @@
 @echo off
-echo Starting Glaucoma Model Evaluation...
+echo Starting Glaucoma Model Evaluation with CDR Calculation...
 echo.
 
 python -m glaucoma.main ^
@@ -11,11 +11,13 @@ python -m glaucoma.main ^
     --image-size 224 ^
     --batch-size 16 ^
     --threshold 0.5 ^
+    --calculate-cdr ^
     --use-wandb ^
     --wandb-project glaucoma-detection ^
     --wandb-detailed-viz ^
-    --wandb-notes "Evaluation of trained UNet model with test-time augmentation"
+    --wandb-notes "Evaluation with CDR calculation for clinical analysis"
 
 echo.
-echo Evaluation completed.
+echo Evaluation with CDR calculation completed.
+echo CDR values saved to output/cdr_results/cdr_values_diameter.csv
 pause

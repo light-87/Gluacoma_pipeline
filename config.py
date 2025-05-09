@@ -114,7 +114,7 @@ class LossConfig:
 class TrainingConfig:
     """Training configuration."""
     # Basic training parameters
-    epochs: int = 30
+    epochs: int = 20
     batch_size: int = 16
     num_workers: int = 4
     
