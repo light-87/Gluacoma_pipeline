@@ -57,7 +57,7 @@ class ModelConfig:
     # Model parameters
     pretrained: bool = True
     in_channels: int = 3
-    num_classes: int = 1
+    num_classes: int = 3
     
     # Checkpoint
     checkpoint_path: Optional[str] = None
@@ -334,7 +334,7 @@ def get_argument_parser() -> argparse.ArgumentParser:
     
     # Model configuration
     parser.add_argument('--architecture', type=str,
-                      choices=['unet', 'unetplusplus', 'deeplabv3', 'deeplabv3plus', 'fpn', 'pspnet'], 
+                      choices=['unet', 'unetplusplus', 'deeplabv3', 'deeplabv3plus', 'fpn', 'pspnet', 'segformer', 'dpt', 'manet', 'pan'], 
                       help='Model architecture')
     parser.add_argument('--encoder', type=str, help='Encoder backbone')
     parser.add_argument('--checkpoint-path', type=str, help='Path to model checkpoint for evaluation')

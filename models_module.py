@@ -68,6 +68,34 @@ def create_model(model_config) -> nn.Module:
             in_channels=in_channels,
             classes=num_classes
         )
+    elif architecture == 'segformer':
+        model = smp.Segformer(
+            encoder_name=encoder,
+            encoder_weights=encoder_weights,
+            in_channels=in_channels,
+            classes=num_classes
+        )
+    elif architecture == 'dpt':
+        model = smp.DPT(
+            encoder_name=encoder,
+            encoder_weights=encoder_weights,
+            in_channels=in_channels,
+            classes=num_classes
+        )
+    elif architecture == 'manet':
+        model = smp.MAnet(
+            encoder_name=encoder,
+            encoder_weights=encoder_weights,
+            in_channels=in_channels,
+            classes=num_classes
+        )
+    elif architecture == 'pan':
+        model = smp.PAN(
+            encoder_name=encoder,
+            encoder_weights=encoder_weights,
+            in_channels=in_channels,
+            classes=num_classes
+        )
     else:
         raise ValueError(f"Unsupported architecture: {architecture}")
     
